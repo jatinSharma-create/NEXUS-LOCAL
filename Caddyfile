@@ -1,0 +1,15 @@
+# Production Caddy — automatic HTTPS via Let's Encrypt.
+# Works with a real domain OR a free sslip.io hostname (no domain purchase):
+#   DOMAIN=203-0-113-10.sslip.io
+#   → https://203-0-113-10.sslip.io
+#   → https://files.203-0-113-10.sslip.io  (MinIO / resume & PDF downloads)
+
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy app:3000
+}
+
+files.{$DOMAIN} {
+	encode gzip
+	reverse_proxy storage:9000
+}

@@ -1,0 +1,137 @@
+services:
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - db
+      - storage
+      - redis
+    networks:
+      - internal
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgres://nexus:nexus@db:5432/nexus}
+      - MINIO_ENDPOINT=storage
+      - MINIO_PORT=9000
+      - MINIO_PUBLIC_ENDPOINT=${MINIO_PUBLIC_ENDPOINT}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - APP_PASSWORD=${APP_PASSWORD}
+      - DOMAIN=${DOMAIN}
+      - GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY}
+      - GOOGLE_GENERATIVE_AI_MODEL=${GOOGLE_GENERATIVE_AI_MODEL}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET=${MINIO_BUCKET}
+      - TELNYX_API_KEY=${TELNYX_API_KEY}
+      - TELNYX_PUBLIC_KEY=${TELNYX_PUBLIC_KEY}
+      - TELNYX_CALL_CONTROL_APP_ID=${TELNYX_CALL_CONTROL_APP_ID}
+      - TELNYX_TELEPHONY_CREDENTIAL_ID=${TELNYX_TELEPHONY_CREDENTIAL_ID}
+      - TELNYX_CALLER_ID=${TELNYX_CALLER_ID}
+      - TELNYX_SIP_URI=${TELNYX_SIP_URI}
+      - PUBLIC_APP_URL=${PUBLIC_APP_URL}
+      - NEXUS_COMPANY_NAME=${NEXUS_COMPANY_NAME}
+      - IVR_CONSENT_ANNOUNCEMENT=${IVR_CONSENT_ANNOUNCEMENT}
+      - CONSENT_GATHER_TIMEOUT_SECS=${CONSENT_GATHER_TIMEOUT_SECS}
+      - CONSENT_MAX_RETRIES=${CONSENT_MAX_RETRIES}
+      - RECORDING_ENABLED=${RECORDING_ENABLED}
+      - STT_PROVIDER=${STT_PROVIDER}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_STT_MODEL=${GROQ_STT_MODEL}
+
+  worker:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      target: worker
+    restart: unless-stopped
+    mem_limit: 1g
+    depends_on:
+      - db
+      - redis
+      - storage
+    networks:
+      - internal
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgres://nexus:nexus@db:5432/nexus}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY}
+      - GOOGLE_GENERATIVE_AI_MODEL=${GOOGLE_GENERATIVE_AI_MODEL}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_STT_MODEL=${GROQ_STT_MODEL}
+      - STT_PROVIDER=${STT_PROVIDER}
+      - TELNYX_API_KEY=${TELNYX_API_KEY}
+      - MINIO_ENDPOINT=storage
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET=${MINIO_BUCKET}
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: nexus
+      POSTGRES_DB: nexus
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  storage:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-password123}
+    volumes:
+      - miniodata:/data
+    networks:
+      - internal
+    # Bound to localhost only — public access goes through Caddy (files.$DOMAIN).
+    # Local UI: http://localhost:9000 / console :9001
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+      - storage
+    environment:
+      - DOMAIN=${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Local/ngrok: set CADDYFILE=Caddyfile.local in .env
+      # Production (free VPS / sslip.io): CADDYFILE=Caddyfile (default)
+      - ./${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pgdata:
+  miniodata:
+  redisdata:
+  caddy_data:
+  caddy_config:

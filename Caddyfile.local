@@ -1,0 +1,9 @@
+{
+	# Local + ngrok: ngrok terminates TLS and forwards plain HTTP to :80.
+	# Forcing HTTPS here caused 308 redirect loops so Telnyx webhooks never reached the app.
+	auto_https off
+}
+
+:80 {
+	reverse_proxy app:3000
+}

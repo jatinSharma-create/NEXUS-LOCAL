@@ -1,0 +1,30 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+*.pem
+*.key
+!*.key.example
+
+# Logs / local data
+*.log
+npm-debug.log*
+.npm
+
+# Docker / local volumes (if ever bind-mounted)
+pgdata/
+miniodata/
+redisdata/
+caddy_data/
+caddy_config/
+
+# Test / local artifacts
+tmp/
+.tmp/
