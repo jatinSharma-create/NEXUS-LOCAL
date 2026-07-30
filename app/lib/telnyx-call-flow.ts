@@ -94,7 +94,13 @@ export async function findCallRow(
 }
 
 async function playConsentGather(callControlId: string) {
-  await gatherUsingSpeak(callControlId, IVR_CONSENT_ANNOUNCEMENT, 'Polly.Matthew-Neural', TIMEOUT_SECS, 1);
+  console.log(`[telnyx] playing consent IVR on call_control_id=${callControlId}`);
+  try {
+    await gatherUsingSpeak(callControlId, IVR_CONSENT_ANNOUNCEMENT, 'Polly.Matthew-Neural', TIMEOUT_SECS, 1);
+  } catch (err) {
+    console.error('[telnyx] gather_using_speak failed — callee will hear silence:', err);
+    throw err;
+  }
 }
 
 /**
@@ -243,11 +249,12 @@ export async function handleWebhookEvent(event: {
         break;
       }
 
-      // Candidate answered (outbound or inbound): mark in_progress, play consent, DO NOT record yet
+      // Candidate answered (outbound or inbound): play consent on the PHONE leg, DO NOT record yet.
+      // The browser dialer stays silent until after DTMF — IVR audio is never sent to WebRTC.
       if (callRow) {
         await query(
           `UPDATE calls
-           SET status = 'in_progress',
+           SET status = 'awaiting_consent',
                started_at = COALESCE(started_at, NOW()),
                telnyx_call_control_id = COALESCE(telnyx_call_control_id, $1)
            WHERE id = $2`,

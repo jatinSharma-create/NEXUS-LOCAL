@@ -134,11 +134,16 @@ export function CandidatesTable({ initialCandidates }: CandidatesTableProps) {
       );
     }
 
+    const capitalize =
+      field === 'status' || field === 'name' || field === 'current_role';
+
     return (
       <button
         type="button"
         onClick={() => startEdit(candidate, field)}
-        className="text-left w-full rounded px-1 py-0.5 -mx-1 hover:bg-background transition-colors capitalize"
+        className={`text-left w-full rounded px-1 py-0.5 -mx-1 hover:bg-background transition-colors${
+          capitalize ? ' capitalize' : ''
+        }`}
         title="Click to edit"
       >
         {display ?? (candidate[field] as string) ?? <span className="text-muted">—</span>}

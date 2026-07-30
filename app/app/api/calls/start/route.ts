@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { dial } from '@/lib/telnyx';
+import { dial, getTelnyxWebhookUrl } from '@/lib/telnyx';
 import { normalizePhone } from '@/lib/phone';
 
 export const dynamic = 'force-dynamic';
@@ -34,6 +34,17 @@ export async function POST(request: Request) {
     if (!recruiterSipUri || recruiterSipUri.includes('your_sip_username')) {
       return NextResponse.json(
         { error: 'TELNYX_SIP_URI is not configured' },
+        { status: 500 }
+      );
+    }
+
+    // Fail fast if ngrok/public URL is missing — otherwise callee answers to silence (no IVR).
+    let webhookUrl: string;
+    try {
+      webhookUrl = getTelnyxWebhookUrl();
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : 'PUBLIC_APP_URL is not configured' },
         { status: 500 }
       );
     }
@@ -116,9 +127,12 @@ export async function POST(request: Request) {
       callControlId: callControlId || null,
       candidateId: resolvedCandidateId,
       phone: dialPhone,
+      webhookUrl,
+      hint: 'Consent IVR plays on the phone you dialed — not in the browser. Press 1 or 2 on that handset.',
     });
   } catch (error) {
     console.error('Error starting call:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Internal Server Error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

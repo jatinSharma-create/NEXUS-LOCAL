@@ -194,7 +194,13 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
       {callState === 'dialing' && <span className="text-muted text-sm">Calling…</span>}
 
       {callState === 'awaiting_consent' && (
-        <span className="text-muted text-sm">Waiting for consent (1 or 2)…</span>
+        <div className="text-sm text-muted max-w-xs">
+          <p className="font-medium text-foreground">Waiting for consent…</p>
+          <p className="mt-0.5 text-xs">
+            Listen on the phone you dialed — the IVR plays there (not in this browser). Press 1 to
+            record or 2 to continue without recording.
+          </p>
+        </div>
       )}
 
       {callState === 'connected' && (

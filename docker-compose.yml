@@ -8,6 +8,9 @@ services:
       - db
       - storage
       - redis
+    ports:
+      # Direct access if Caddy/HTTPS is awkward: http://localhost:3000
+      - "127.0.0.1:3000:3000"
     networks:
       - internal
     environment:
@@ -91,8 +94,7 @@ services:
       - miniodata:/data
     networks:
       - internal
-    # Bound to localhost only — public access goes through Caddy (files.$DOMAIN).
-    # Local UI: http://localhost:9000 / console :9001
+    # Bound to localhost only. UI: http://localhost:9000 / console :9001
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
@@ -117,9 +119,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      # Local/ngrok: set CADDYFILE=Caddyfile.local in .env
-      # Production (free VPS / sslip.io): CADDYFILE=Caddyfile (default)
-      - ./${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile
+      # Local HTTP only (ngrok-friendly). See Caddyfile.local.
+      - ./Caddyfile.local:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
     networks:

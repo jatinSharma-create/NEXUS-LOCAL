@@ -187,7 +187,8 @@ export function KeypadDialer() {
             className="nexus-input font-mono text-lg tracking-wide text-center"
           />
           <p className="text-xs text-muted mt-2">
-            Include country code. Consent IVR (press 1 or 2) runs the same as candidate calls.
+            Include country code. When they answer, the consent IVR plays on their phone (press 1 or
+            2) — this browser stays silent until you are connected.
           </p>
         </div>
 
@@ -237,7 +238,9 @@ export function KeypadDialer() {
           {!error && callState === 'connecting' && <span className="text-muted">Connecting dialer…</span>}
           {!error && callState === 'dialing' && <span className="text-muted">Calling…</span>}
           {!error && callState === 'awaiting_consent' && (
-            <span className="text-muted">Waiting for consent (1 or 2)…</span>
+            <span className="text-muted">
+              Waiting for consent on their phone (press 1 or 2)…
+            </span>
           )}
           {!error && callState === 'connected' && (
             <span className="font-mono tabular-nums">{formatTime(duration)} · Connected</span>

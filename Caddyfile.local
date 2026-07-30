@@ -1,7 +1,14 @@
 {
-	# Local + ngrok: ngrok terminates TLS and forwards plain HTTP to :80.
-	# Forcing HTTPS here caused 308 redirect loops so Telnyx webhooks never reached the app.
-	auto_https off
+	# Local: serve HTTP for ngrok, and HTTPS with Caddy's internal CA for browsers.
+	# Without this, https://localhost fails with "connection failed" because :443
+	# was published but nothing answered TLS.
+	local_certs
+	auto_https disable_redirects
+}
+
+localhost {
+	tls internal
+	reverse_proxy app:3000
 }
 
 :80 {

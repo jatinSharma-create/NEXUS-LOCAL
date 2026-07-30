@@ -52,11 +52,32 @@ export async function generateWebrtcToken(telephonyCredentialId: string) {
   return token.replace(/^"|"$/g, '');
 }
 
+/** Public HTTPS base (ngrok locally). Required so Telnyx can deliver call webhooks. */
+export function getPublicAppUrl(): string {
+  const raw = (process.env.PUBLIC_APP_URL || '').trim().replace(/\/$/, '');
+  if (!raw || raw.includes('xxxx.ngrok') || raw.includes('localhost')) {
+    throw new Error(
+      'PUBLIC_APP_URL must be a public HTTPS URL (e.g. your ngrok URL). Start ngrok with: ngrok http 80'
+    );
+  }
+  if (!raw.startsWith('https://')) {
+    throw new Error('PUBLIC_APP_URL must start with https://');
+  }
+  return raw;
+}
+
+export function getTelnyxWebhookUrl(): string {
+  return `${getPublicAppUrl()}/api/webhooks/telnyx`;
+}
+
 export async function dial(destinationNumber: string, callerId: string, clientState: string) {
   const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID;
   if (!connectionId) {
     throw new Error('TELNYX_CALL_CONTROL_APP_ID is not configured');
   }
+
+  const webhookUrl = getTelnyxWebhookUrl();
+  console.log(`[telnyx] dial to=${destinationNumber} webhook_url=${webhookUrl}`);
 
   return telnyxFetch('/calls', {
     method: 'POST',
@@ -65,6 +86,9 @@ export async function dial(destinationNumber: string, callerId: string, clientSt
       to: destinationNumber,
       from: callerId,
       client_state: Buffer.from(clientState).toString('base64'),
+      // Per-call webhook so IVR still works even if Mission Control points at an old ngrok URL.
+      webhook_url: webhookUrl,
+      webhook_url_method: 'POST',
     }),
   });
 }
