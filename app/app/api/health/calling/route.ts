@@ -54,18 +54,15 @@ export async function GET() {
     required.PUBLIC_APP_URL &&
     publicReachable === true;
 
+  const callerId = process.env.TELNYX_CALLER_ID || null;
+
   return NextResponse.json({
     ready,
     publicAppUrl: publicAppUrl || null,
     webhookUrl,
     publicReachable,
     publicStatus,
+    callerId,
     required,
-    tips: [
-      'Keep `ngrok http 80` running while testing calls.',
-      'Consent IVR plays on the callee phone, not in the browser dialer.',
-      'In Telnyx Mission Control, set Call Control webhook to webhookUrl (also sent per dial).',
-      'After they press 1 or 2 on the phone, the browser auto-connects.',
-    ],
   });
 }

@@ -29,6 +29,8 @@ export function KeypadDialer() {
   const activeCallRef = useRef<TelnyxCall | null>(null);
   const clientRef = useRef<InstanceType<typeof TelnyxRTC> | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const nexusCallIdRef = useRef<string | null>(null);
+  const hangingUpRef = useRef(false);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current) {
@@ -42,6 +44,42 @@ export function KeypadDialer() {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
   }, []);
+
+  useEffect(() => {
+    if (callState !== 'dialing' && callState !== 'awaiting_consent') return;
+    const callId = nexusCallIdRef.current;
+    if (!callId) return;
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/calls/status?callId=${encodeURIComponent(callId)}`);
+        const data = await res.json();
+        if (cancelled || !res.ok) return;
+        if (data.ended && !hangingUpRef.current) {
+          if (data.wentToVoicemail || data.hangupCause === 'screened_no_ring') {
+            setError(data.userMessage || 'Call went to voicemail');
+          } else if (data.hangupCause === 'answering_machine') {
+            setError(data.userMessage || 'Reached voicemail');
+          } else if (data.userMessage && data.hangupCause !== 'recruiter_hangup') {
+            setError(data.userMessage);
+          }
+          setCallState('ended');
+          stopTimer();
+          nexusCallIdRef.current = null;
+        }
+      } catch {
+        // ignore transient poll errors
+      }
+    };
+
+    void tick();
+    const id = setInterval(tick, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [callState, stopTimer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,7 +106,7 @@ export function KeypadDialer() {
         });
 
         rtc.on('telnyx.error', () => {
-          setError('WebRTC connection error');
+          setError('Connection error');
         });
 
         rtc.on('telnyx.notification', (notification: { type: string; call?: TelnyxCall }) => {
@@ -84,13 +122,16 @@ export function KeypadDialer() {
             }
             activeCallRef.current = call;
           } else if (call.state === 'active') {
-            setCallState('connected');
-            startTimer();
+            if (!hangingUpRef.current) {
+              setCallState('connected');
+              startTimer();
+            }
             void remoteAudioRef.current?.play().catch(() => undefined);
           } else if (call.state === 'hangup' || call.state === 'destroy') {
             setCallState('ended');
             stopTimer();
             activeCallRef.current = null;
+            hangingUpRef.current = false;
           }
         });
 
@@ -99,7 +140,7 @@ export function KeypadDialer() {
         setClient(rtc);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to init calling');
+          setError(err instanceof Error ? err.message : 'Failed to initialize calling');
           setCallState('idle');
         }
       }
@@ -133,6 +174,8 @@ export function KeypadDialer() {
   async function handleCall() {
     if (!ready || !digits.trim()) return;
     setError('');
+    hangingUpRef.current = false;
+    nexusCallIdRef.current = null;
     setCallState('dialing');
 
     try {
@@ -143,6 +186,7 @@ export function KeypadDialer() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to start call');
+      nexusCallIdRef.current = data.callId || null;
       setCallState('awaiting_consent');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start call');
@@ -150,8 +194,30 @@ export function KeypadDialer() {
     }
   }
 
-  function handleHangup() {
-    if (activeCallRef.current) activeCallRef.current.hangup();
+  async function handleHangup() {
+    hangingUpRef.current = true;
+    const callId = nexusCallIdRef.current;
+
+    try {
+      activeCallRef.current?.hangup();
+    } catch {
+      // ignore
+    }
+    activeCallRef.current = null;
+
+    if (callId) {
+      try {
+        await fetch('/api/calls/hangup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callId }),
+        });
+      } catch (err) {
+        console.error('Failed to hang up via API:', err);
+      }
+    }
+
+    nexusCallIdRef.current = null;
     setCallState('ended');
     stopTimer();
   }
@@ -168,7 +234,6 @@ export function KeypadDialer() {
 
   return (
     <div className="max-w-sm mx-auto">
-      {/* Required for Telnyx remote (inbound) audio playback */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
       <div className="nexus-panel p-6 space-y-5">
@@ -182,13 +247,12 @@ export function KeypadDialer() {
               setDigits(e.target.value.replace(/[^\d+*#]/g, '').slice(0, 20));
               setError('');
             }}
-            placeholder="+61…"
+            placeholder="+61 4…"
             disabled={inCall}
             className="nexus-input font-mono text-lg tracking-wide text-center"
           />
-          <p className="text-xs text-muted mt-2">
-            Include country code. When they answer, the consent IVR plays on their phone (press 1 or
-            2) — this browser stays silent until you are connected.
+          <p className="text-xs text-muted mt-2 text-center">
+            Enter the full number with country code.
           </p>
         </div>
 
@@ -235,12 +299,10 @@ export function KeypadDialer() {
 
         <div className="min-h-[1.25rem] text-sm text-center">
           {error && <span className="text-[color:var(--danger)]">{error}</span>}
-          {!error && callState === 'connecting' && <span className="text-muted">Connecting dialer…</span>}
+          {!error && callState === 'connecting' && <span className="text-muted">Connecting…</span>}
           {!error && callState === 'dialing' && <span className="text-muted">Calling…</span>}
           {!error && callState === 'awaiting_consent' && (
-            <span className="text-muted">
-              Waiting for consent on their phone (press 1 or 2)…
-            </span>
+            <span className="text-muted">Ringing…</span>
           )}
           {!error && callState === 'connected' && (
             <span className="font-mono tabular-nums">{formatTime(duration)} · Connected</span>
@@ -248,10 +310,13 @@ export function KeypadDialer() {
           {!error && callState === 'ended' && (
             <button
               type="button"
-              onClick={() => setCallState('idle')}
+              onClick={() => {
+                setCallState('idle');
+                setError('');
+              }}
               className="nexus-link text-sm"
             >
-              Ready for another call
+              Call again
             </button>
           )}
         </div>

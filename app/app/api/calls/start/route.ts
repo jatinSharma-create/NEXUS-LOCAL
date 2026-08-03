@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { dial, getTelnyxWebhookUrl } from '@/lib/telnyx';
-import { normalizePhone } from '@/lib/phone';
+import { normalizeDialerInput } from '@/lib/phone';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
       resolvedCandidateId = candidate.id;
       dialPhone = candidate.phone;
     } else {
-      const normalized = normalizePhone(String(rawPhone));
+      const normalized = normalizeDialerInput(String(rawPhone));
       if (!normalized) {
         return NextResponse.json(
           { error: 'Invalid phone number. Include a country code (e.g. +61…).' },
@@ -127,8 +127,6 @@ export async function POST(request: Request) {
       callControlId: callControlId || null,
       candidateId: resolvedCandidateId,
       phone: dialPhone,
-      webhookUrl,
-      hint: 'Consent IVR plays on the phone you dialed — not in the browser. Press 1 or 2 on that handset.',
     });
   } catch (error) {
     console.error('Error starting call:', error);

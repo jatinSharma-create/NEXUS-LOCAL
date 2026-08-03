@@ -23,7 +23,27 @@ async function telnyxFetch(path: string, options: RequestInit = {}) {
   if (!response.ok) {
     const errorBody = await response.text();
     console.error(`Telnyx API Error (${response.status}) [${path}]:`, errorBody);
-    throw new Error(`Telnyx API Error: ${response.status} ${response.statusText}`);
+
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const parsed = JSON.parse(errorBody) as {
+        errors?: Array<{ code?: string; detail?: string; title?: string }>;
+        telnyx_error?: { error_code?: string };
+      };
+      const first = parsed.errors?.[0];
+      const code = parsed.telnyx_error?.error_code || first?.code;
+      const msg = first?.detail || first?.title;
+      if (code === 'D13' || (typeof msg === 'string' && msg.includes('whitelisted'))) {
+        throw new Error(
+          'India (and other non-US/CA destinations) are blocked on your Telnyx Outbound Voice Profile (error D13). In Mission Control → Outbound Voice Profiles, add India (IN) / Asia to whitelisted destinations. Level 2 verification may be required.'
+        );
+      }
+      if (msg) detail = code ? `${code}: ${msg}` : msg;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('Outbound Voice Profile')) throw err;
+    }
+
+    throw new Error(`Telnyx API Error: ${detail}`);
   }
 
   if (response.status === 204) {
@@ -70,14 +90,35 @@ export function getTelnyxWebhookUrl(): string {
   return `${getPublicAppUrl()}/api/webhooks/telnyx`;
 }
 
-export async function dial(destinationNumber: string, callerId: string, clientState: string) {
+/**
+ * Outbound Call Control dial — payload aligned with the known-good NEXUS repo
+ * (connection_id / to / from / client_state only).
+ *
+ * Optional extras (off unless env opts in):
+ * - PER_CALL_WEBHOOK=true → send webhook_url (useful if Mission Control has a stale ngrok URL)
+ * - AMD_ENABLED=true → answering_machine_detection (historically broke live answers)
+ */
+export async function dial(
+  destinationNumber: string,
+  callerId: string,
+  clientState: string,
+  opts?: { answeringMachineDetection?: boolean }
+) {
   const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID;
   if (!connectionId) {
     throw new Error('TELNYX_CALL_CONTROL_APP_ID is not configured');
   }
 
-  const webhookUrl = getTelnyxWebhookUrl();
-  console.log(`[telnyx] dial to=${destinationNumber} webhook_url=${webhookUrl}`);
+  const isSip = destinationNumber.toLowerCase().startsWith('sip:');
+  const useAmd =
+    opts?.answeringMachineDetection ??
+    (!isSip && process.env.AMD_ENABLED === 'true');
+  const usePerCallWebhook = process.env.PER_CALL_WEBHOOK === 'true';
+  const webhookUrl = usePerCallWebhook ? getTelnyxWebhookUrl() : null;
+
+  console.log(
+    `[telnyx] dial to=${destinationNumber} from=${callerId} webhook=${webhookUrl || 'mission-control'} amd=${useAmd}`
+  );
 
   return telnyxFetch('/calls', {
     method: 'POST',
@@ -86,9 +127,15 @@ export async function dial(destinationNumber: string, callerId: string, clientSt
       to: destinationNumber,
       from: callerId,
       client_state: Buffer.from(clientState).toString('base64'),
-      // Per-call webhook so IVR still works even if Mission Control points at an old ngrok URL.
-      webhook_url: webhookUrl,
-      webhook_url_method: 'POST',
+      ...(webhookUrl
+        ? { webhook_url: webhookUrl, webhook_url_method: 'POST' }
+        : {}),
+      ...(useAmd
+        ? {
+            answering_machine_detection:
+              process.env.AMD_MODE || 'premium_ios_call_screening_detection',
+          }
+        : {}),
     }),
   });
 }

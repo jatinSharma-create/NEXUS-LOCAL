@@ -28,8 +28,38 @@ const SCRIPT_NO_INPUT = `We did not receive your response. This call will now en
 export const RECORDING_DECLINED_NOTE =
   'Candidate did not consent for this call to be recorded.';
 
+/** Candidate legs that already started the consent IVR (avoid double-play). */
+const consentStarted = new Set<string>();
+
+/** Call-control IDs that already hung up — ignore late gather/speak commands. */
+const callEnded = new Set<string>();
+
 /** Guard against duplicate dials if speak.ended is delivered more than once. */
 const recruiterDialStarted = new Set<string>();
+
+/**
+ * Hang up only after a confirmed voicemail beep — never while waiting for AMD,
+ * and never for iOS Call Screening / Live Voicemail false positives alone.
+ */
+async function hangupAsAnsweringMachine(callControlId: string, stateObj: ClientState) {
+  const callRow = await findCallRow(stateObj, callControlId);
+  if (callRow) {
+    await query(
+      `UPDATE calls
+       SET status = 'completed',
+           hangup_cause = 'answering_machine',
+           ended_at = COALESCE(ended_at, NOW())
+       WHERE id = $1
+         AND status NOT IN ('completed')`,
+      [callRow.id]
+    );
+  }
+  try {
+    await hangupCall(callControlId);
+  } catch (err) {
+    console.warn('[telnyx] hangup after AMD machine (non-fatal):', err);
+  }
+}
 
 export type ClientState = {
   call_id?: string;
@@ -60,6 +90,7 @@ export type CallRow = {
   candidate_id: string | null;
   consent_retries: number | null;
   consent_confirmed: boolean | null;
+  consent_method: string | null;
   status: string | null;
   started_at: Date | null;
 };
@@ -74,7 +105,7 @@ export async function findCallRow(
 ): Promise<CallRow | null> {
   if (stateObj.call_id) {
     const byId = await query<CallRow>(
-      `SELECT id, candidate_id, consent_retries, consent_confirmed, status, started_at
+      `SELECT id, candidate_id, consent_retries, consent_confirmed, consent_method, status, started_at
        FROM calls WHERE id = $1`,
       [stateObj.call_id]
     );
@@ -83,7 +114,7 @@ export async function findCallRow(
 
   if (callControlId) {
     const byCc = await query<CallRow>(
-      `SELECT id, candidate_id, consent_retries, consent_confirmed, status, started_at
+      `SELECT id, candidate_id, consent_retries, consent_confirmed, consent_method, status, started_at
        FROM calls WHERE telnyx_call_control_id = $1`,
       [callControlId]
     );
@@ -94,10 +125,26 @@ export async function findCallRow(
 }
 
 async function playConsentGather(callControlId: string) {
+  if (callEnded.has(callControlId)) {
+    console.log(`[telnyx] skip consent IVR — call already ended call_control_id=${callControlId}`);
+    return;
+  }
+  if (consentStarted.has(callControlId)) {
+    console.log(`[telnyx] consent IVR already started for call_control_id=${callControlId}`);
+    return;
+  }
+  consentStarted.add(callControlId);
   console.log(`[telnyx] playing consent IVR on call_control_id=${callControlId}`);
   try {
     await gatherUsingSpeak(callControlId, IVR_CONSENT_ANNOUNCEMENT, 'Polly.Matthew-Neural', TIMEOUT_SECS, 1);
   } catch (err) {
+    consentStarted.delete(callControlId);
+    // Hangup races are normal (screening/voicemail drops mid-IVR).
+    const message = err instanceof Error ? err.message : String(err);
+    if (callEnded.has(callControlId) || message.includes('422')) {
+      console.warn('[telnyx] gather_using_speak skipped — call no longer active:', message);
+      return;
+    }
     console.error('[telnyx] gather_using_speak failed — callee will hear silence:', err);
     throw err;
   }
@@ -172,7 +219,8 @@ async function dialRecruiterAfterConsent(
   await dial(
     recruiterSipUri,
     process.env.TELNYX_CALLER_ID || String(payload.to || ''),
-    bridgeState
+    bridgeState,
+    { answeringMachineDetection: false }
   );
 }
 
@@ -249,8 +297,7 @@ export async function handleWebhookEvent(event: {
         break;
       }
 
-      // Candidate answered (outbound or inbound): play consent on the PHONE leg, DO NOT record yet.
-      // The browser dialer stays silent until after DTMF — IVR audio is never sent to WebRTC.
+      // Candidate/inbound answered. Do NOT record yet.
       if (callRow) {
         await query(
           `UPDATE calls
@@ -262,7 +309,86 @@ export async function handleWebhookEvent(event: {
         );
       }
 
+      // Always play consent IVR immediately. Waiting for AMD left humans in silence
+      // and iPhone Live Voicemail / Call Screening (beep_detected) hung up before
+      // anyone heard the prompt — which looked like "goes straight to voicemail".
+      console.log(
+        `[telnyx] answered call_control_id=${callControlId} leg=${stateObj.leg || 'unknown'} — playing consent IVR`
+      );
       await playConsentGather(callControlId);
+      break;
+    }
+
+    case 'call.machine.premium.call_screening.detected': {
+      // Apple Call Screening tone — identify the caller so the user can pick up.
+      if (stateObj.leg === 'recruiter') break;
+      console.log(
+        `[telnyx] iOS call screening detected call_control_id=${callControlId} — identifying caller`
+      );
+      try {
+        await speakText(
+          callControlId,
+          `This is a recruiter from ${COMPANY_NAME}. Please accept the call.`
+        );
+      } catch (err) {
+        console.warn('[telnyx] screening identify speak failed (non-fatal):', err);
+      }
+      break;
+    }
+
+    case 'call.machine.detection.ended':
+    case 'call.machine.premium.detection.ended': {
+      // AMD is informational only when IVR already started on answer.
+      if (stateObj.leg === 'recruiter') break;
+
+      const result = String(payload.result || '').toLowerCase();
+      console.log(`[telnyx] AMD result=${result || 'unknown'} call_control_id=${callControlId}`);
+
+      // Fax only — hang up. Do NOT hang up on "machine"/"silence": iOS Call
+      // Screening and Live Voicemail often classify as machine before the human
+      // picks up, and hanging up is exactly the "no ring / voicemail" bug.
+      if (result === 'fax_detected') {
+        await hangupAsAnsweringMachine(callControlId, stateObj);
+        break;
+      }
+
+      // If IVR somehow never started, play it now (human / not_sure / machine).
+      if (!consentStarted.has(callControlId)) {
+        await playConsentGather(callControlId);
+      }
+      break;
+    }
+
+    case 'call.machine.greeting.ended':
+    case 'call.machine.premium.greeting.ended': {
+      if (stateObj.leg === 'recruiter') break;
+      const result = String(payload.result || '').toLowerCase();
+      console.log(
+        `[telnyx] AMD greeting ended result=${result || 'unknown'} call_control_id=${callControlId}`
+      );
+
+      // iOS screening prompt ended without a beep — identify and keep IVR path.
+      if (result === 'prompt_ended') {
+        try {
+          await speakText(
+            callControlId,
+            `This is a recruiter from ${COMPANY_NAME}. Please accept the call.`
+          );
+        } catch (err) {
+          console.warn('[telnyx] prompt_ended speak failed (non-fatal):', err);
+        }
+        if (!consentStarted.has(callControlId)) {
+          await playConsentGather(callControlId);
+        }
+        break;
+      }
+
+      // Confirmed voicemail beep: hang up only when AMD_HANGUP_ON_BEEP=true.
+      // Default off — beep false-positives (esp. Live Voicemail) were killing live calls.
+      const hangupOnBeep = process.env.AMD_HANGUP_ON_BEEP === 'true';
+      if (hangupOnBeep && (result.includes('beep') || result === 'beep_detected')) {
+        await hangupAsAnsweringMachine(callControlId, stateObj);
+      }
       break;
     }
 
@@ -273,6 +399,13 @@ export async function handleWebhookEvent(event: {
     }
 
     case 'call.gather.ended': {
+      if (callEnded.has(callControlId)) {
+        console.log(
+          `[telnyx] ignore late gather.ended — call already ended call_control_id=${callControlId}`
+        );
+        break;
+      }
+
       const digits = String(payload.digits || '').trim();
       const callRow = await findCallRow(stateObj, callControlId);
       const profileCandidateId = candidateId || callRow?.candidate_id;
@@ -354,6 +487,13 @@ export async function handleWebhookEvent(event: {
               callRow.id,
             ]);
           }
+          // gather.ended means the previous gather finished — allow a fresh IVR
+          // replay. Leaving consentStarted set caused silent retries (looked like
+          // "call is going but nothing on my phone").
+          consentStarted.delete(callControlId);
+          console.log(
+            `[telnyx] consent gather empty digits — retry ${retries + 1}/${MAX_RETRIES} call_control_id=${callControlId}`
+          );
           await playConsentGather(callControlId);
         } else {
           if (callRow) {
@@ -414,11 +554,20 @@ export async function handleWebhookEvent(event: {
     }
 
     case 'call.hangup': {
+      callEnded.add(callControlId);
+      if (stateObj.bridge_to) {
+        callEnded.add(stateObj.bridge_to);
+      }
+      consentStarted.delete(callControlId);
+      if (stateObj.bridge_to) {
+        consentStarted.delete(stateObj.bridge_to);
+      }
       recruiterDialStarted.delete(callControlId);
       if (stateObj.bridge_to) {
         recruiterDialStarted.delete(stateObj.bridge_to);
       }
 
+      // If recruiter WebRTC leg ends, always kill the candidate PSTN leg.
       if (stateObj.bridge_to && stateObj.leg === 'recruiter') {
         try {
           await hangupCall(stateObj.bridge_to);
@@ -439,9 +588,25 @@ export async function handleWebhookEvent(event: {
             ? parseInt(payloadDuration, 10)
             : null;
 
+      // Far-end hangup after auto-answer with no DTMF usually means iPhone
+      // Silence Unknown Callers / Live Voicemail / carrier spam answered
+      // without ringing the handset (US caller ID → AU mobile is a common case).
+      let hangupCause = String(
+        payload.hangup_cause || payload.sip_hangup_cause || 'remote_hangup'
+      );
+      if (
+        stateObj.leg !== 'recruiter' &&
+        !callRow.consent_method &&
+        callRow.started_at &&
+        (hangupCause === 'normal_clearing' || hangupCause === 'remote_hangup')
+      ) {
+        hangupCause = 'screened_no_ring';
+      }
+
       await query(
         `UPDATE calls
          SET status = 'completed',
+             hangup_cause = COALESCE(hangup_cause, $3),
              ended_at = COALESCE(ended_at, NOW()),
              duration_seconds = COALESCE(
                $2::INT,
@@ -453,7 +618,14 @@ export async function handleWebhookEvent(event: {
              )
          WHERE id = $1
            AND status NOT IN ('completed')`,
-        [callRow.id, Number.isFinite(durationFromPayload) ? durationFromPayload : null]
+        [
+          callRow.id,
+          Number.isFinite(durationFromPayload) ? durationFromPayload : null,
+          hangupCause,
+        ]
+      );
+      console.log(
+        `[telnyx] hangup call_id=${callRow.id} cause=${hangupCause} raw=${payload.hangup_cause || payload.sip_hangup_cause || 'n/a'} state_leg=${stateObj.leg || 'n/a'}`
       );
       break;
     }

@@ -41,6 +41,9 @@ services:
       - STT_PROVIDER=${STT_PROVIDER}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GROQ_STT_MODEL=${GROQ_STT_MODEL}
+      - AMD_ENABLED=${AMD_ENABLED:-false}
+      - AMD_MODE=${AMD_MODE:-premium_ios_call_screening_detection}
+      - AMD_HANGUP_ON_BEEP=${AMD_HANGUP_ON_BEEP:-false}
 
   worker:
     build:

@@ -7,6 +7,7 @@ interface CallDialerProps {
   candidateId: string;
   phone: string;
   doNotContact: boolean;
+  callerId?: string;
 }
 
 type CallState = 'idle' | 'connecting' | 'dialing' | 'awaiting_consent' | 'connected' | 'ended';
@@ -27,6 +28,8 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
   const activeCallRef = useRef<TelnyxCall | null>(null);
   const clientRef = useRef<InstanceType<typeof TelnyxRTC> | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const nexusCallIdRef = useRef<string | null>(null);
+  const hangingUpRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,7 +58,7 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
         });
 
         rtc.on('telnyx.error', () => {
-          setError('WebRTC connection error');
+          setError('Connection error');
         });
 
         rtc.on(
@@ -68,21 +71,22 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
               const audio = remoteAudioRef.current;
               if (audio) {
                 call.answer({ remoteElement: audio });
-                void audio.play().catch(() => {
-                  // Autoplay may require a prior user gesture; Call click counts.
-                });
+                void audio.play().catch(() => undefined);
               } else {
                 call.answer();
               }
               activeCallRef.current = call;
             } else if (call.state === 'active') {
-              setCallState('connected');
-              startTimer();
+              if (!hangingUpRef.current) {
+                setCallState('connected');
+                startTimer();
+              }
               void remoteAudioRef.current?.play().catch(() => undefined);
             } else if (call.state === 'hangup' || call.state === 'destroy') {
               setCallState('ended');
               stopTimer();
               activeCallRef.current = null;
+              hangingUpRef.current = false;
             }
           }
         );
@@ -92,7 +96,7 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
         setClient(rtc);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to init calling');
+          setError(err instanceof Error ? err.message : 'Failed to initialize calling');
           setCallState('idle');
         }
       }
@@ -113,6 +117,42 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
     };
   }, []);
 
+  useEffect(() => {
+    if (callState !== 'dialing' && callState !== 'awaiting_consent') return;
+    const callId = nexusCallIdRef.current;
+    if (!callId) return;
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/calls/status?callId=${encodeURIComponent(callId)}`);
+        const data = await res.json();
+        if (cancelled || !res.ok) return;
+        if (data.ended && !hangingUpRef.current) {
+          if (data.wentToVoicemail || data.hangupCause === 'screened_no_ring') {
+            setError(data.userMessage || 'Call went to voicemail');
+          } else if (data.hangupCause === 'answering_machine') {
+            setError(data.userMessage || 'Reached voicemail');
+          } else if (data.userMessage && data.hangupCause !== 'recruiter_hangup') {
+            setError(data.userMessage);
+          }
+          setCallState('ended');
+          stopTimer();
+          nexusCallIdRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    void tick();
+    const id = setInterval(tick, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [callState]);
+
   const startTimer = () => {
     setDuration(0);
     if (timerRef.current) clearInterval(timerRef.current);
@@ -129,6 +169,8 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
   const handleCall = async () => {
     if (doNotContact || !ready) return;
     setError('');
+    hangingUpRef.current = false;
+    nexusCallIdRef.current = null;
     setCallState('dialing');
 
     try {
@@ -141,6 +183,7 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
       if (!res.ok) {
         throw new Error(data.error || 'Failed to start call');
       }
+      nexusCallIdRef.current = data.callId || null;
       setCallState('awaiting_consent');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An unknown error occurred');
@@ -148,10 +191,30 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
     }
   };
 
-  const handleHangup = () => {
-    if (activeCallRef.current) {
-      activeCallRef.current.hangup();
+  const handleHangup = async () => {
+    hangingUpRef.current = true;
+    const callId = nexusCallIdRef.current;
+
+    try {
+      activeCallRef.current?.hangup();
+    } catch {
+      // ignore
     }
+    activeCallRef.current = null;
+
+    if (callId) {
+      try {
+        await fetch('/api/calls/hangup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callId }),
+        });
+      } catch (err) {
+        console.error('Failed to hang up via API:', err);
+      }
+    }
+
+    nexusCallIdRef.current = null;
     setCallState('ended');
     stopTimer();
   };
@@ -172,12 +235,14 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
     );
   }
 
+  const inFlight =
+    callState === 'dialing' || callState === 'awaiting_consent' || callState === 'connected';
+
   return (
-    <div className="flex items-center gap-3">
-      {/* Required for Telnyx remote (inbound) audio playback */}
+    <div className="flex items-center gap-3 flex-wrap justify-end">
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
-      {error && <span className="text-sm text-[color:var(--danger)]">{error}</span>}
+      {error && <span className="text-sm text-[color:var(--danger)] max-w-xs text-right">{error}</span>}
 
       {callState === 'connecting' && <span className="text-muted text-sm">Connecting…</span>}
 
@@ -194,34 +259,31 @@ export function CallDialer({ candidateId, phone, doNotContact }: CallDialerProps
       {callState === 'dialing' && <span className="text-muted text-sm">Calling…</span>}
 
       {callState === 'awaiting_consent' && (
-        <div className="text-sm text-muted max-w-xs">
-          <p className="font-medium text-foreground">Waiting for consent…</p>
-          <p className="mt-0.5 text-xs">
-            Listen on the phone you dialed — the IVR plays there (not in this browser). Press 1 to
-            record or 2 to continue without recording.
-          </p>
-        </div>
+        <span className="text-sm text-muted">Ringing…</span>
       )}
 
       {callState === 'connected' && (
         <div className="flex items-center gap-3 border border-border bg-panel px-3 py-1.5 rounded">
           <span className="text-sm font-medium font-mono tabular-nums">{formatTime(duration)}</span>
           <span className="text-muted text-xs">Connected</span>
-          <button
-            onClick={handleHangup}
-            className="text-sm text-[color:var(--danger)] hover:underline ml-1"
-            aria-label="Hang up"
-          >
-            Hang up
-          </button>
         </div>
+      )}
+
+      {inFlight && (
+        <button
+          onClick={handleHangup}
+          className="text-sm text-[color:var(--danger)] hover:underline"
+          aria-label="Hang up"
+        >
+          Hang up
+        </button>
       )}
 
       {callState === 'ended' && (
         <div className="flex items-center gap-3">
-          <span className="text-muted text-sm">Call ended</span>
-          <button onClick={() => setCallState('idle')} className="nexus-btn-secondary text-xs">
-            Reset
+          {!error && <span className="text-muted text-sm">Call ended</span>}
+          <button onClick={() => { setCallState('idle'); setError(''); }} className="nexus-btn-secondary text-xs">
+            Call again
           </button>
         </div>
       )}
