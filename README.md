@@ -423,18 +423,117 @@ docker compose up -d
 docker compose down
 ```
 
-### Update to newest code from GitHub, then rebuild
+This stops containers but **does not delete** your candidates, notes, resumes, or call history.
+
+---
+
+## Part I — Updating without losing your data (read this carefully)
+
+This is one of the most important sections. Many people worry that `git pull` will wipe their candidates. **It will not** — if you follow the safe steps below.
+
+### Where your data actually lives
+
+When you use Docker, Nexus stores your real data in **Docker volumes** on your computer — not inside the GitHub repo folder.
+
+| What | Where it is stored |
+|------|--------------------|
+| Candidates, notes, call records | Docker volume `pgdata` (Postgres database) |
+| Resumes, recordings, PDFs | Docker volume `miniodata` (MinIO storage) |
+| Temporary queue data | Docker volume `redisdata` |
+
+Your `.env` file also stays on your computer. It is **not** downloaded from GitHub (and git will not overwrite it when you pull).
+
+**`git pull` only updates code files** (the app, README, etc.). It does **not** touch Docker volumes, so your data stays safe.
+
+### Safe update (recommended — no data loss)
+
+Use this whenever the team pushes new code to GitHub:
+
+```bash
+cd ~/Desktop/NEXUS-LOCAL          # or wherever you cloned the repo
+git pull
+docker compose up -d --build
+```
+
+That is it. Your candidates, notes, and uploads should still be there after the rebuild.
+
+### Commands that are SAFE (data kept)
+
+| Command | What it does | Data lost? |
+|---------|----------------|------------|
+| `git pull` | Downloads new code from GitHub | **No** |
+| `docker compose up -d --build` | Rebuilds and restarts the app | **No** |
+| `docker compose down` | Stops everything | **No** |
+| `docker compose restart app` | Restarts one service | **No** |
+| Closing Docker Desktop (then reopening) | Pauses containers | **No** (volumes remain) |
+
+### Commands that DELETE data (avoid unless you mean to)
+
+| Command | What it does | Data lost? |
+|---------|----------------|------------|
+| `docker compose down -v` | Stops **and wipes all volumes** | **YES — everything gone** |
+| Deleting Docker volumes manually in Docker Desktop | Wipes storage | **YES** |
+| `docker volume rm ...` | Deletes a specific volume | **YES** |
+| Deleting the `NEXUS-LOCAL` folder **without** backing up | You lose `.env` and local config | **Partial** (Docker volumes may survive if not removed) |
+
+> **Golden rule:** Never run `docker compose down -v` unless you intentionally want a completely fresh empty Nexus with zero candidates.
+
+### If a teammate added a database migration
+
+Sometimes new features need a one-time SQL update on an **existing** database (not a brand-new install).
+
+If the README or a teammate says to run a migration file, do this **once** after `git pull`:
+
+```bash
+docker compose exec -T db psql -U nexus -d nexus < db/migrate-day1.sql
+```
+
+Replace the filename with whatever migration they mention. This updates the database structure **without** deleting your rows.
+
+Fresh installs (first time ever, or after `down -v`) run `db/init.sql` automatically — you usually do not need manual migrations then.
+
+### Extra-safe update (optional, for peace of mind)
+
+If you want to be cautious before a big update:
+
+1. Make sure Nexus is running.
+2. Open the app and confirm your candidates are visible (quick sanity check).
+3. Run the safe update:
 
 ```bash
 git pull
 docker compose up -d --build
 ```
 
+4. Refresh the browser and confirm candidates are still there.
+
+You do **not** need to stop Nexus before `git pull`. Stopping first is optional.
+
+### What if something goes wrong after an update?
+
+1. Check containers: `docker compose ps`
+2. Check logs: `docker compose logs -f app`
+3. Ask a teammate before running `docker compose down -v`
+4. Your data is still in Docker volumes until someone runs `-v` or deletes volumes
+
+---
+
+## Everyday commands (continued)
+
 ### See if containers are running
 
 ```bash
 docker compose ps
 ```
+
+### Update to newest code from GitHub (safe — keeps your data)
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+See **Part I** above for the full explanation of why this does not delete your candidates.
 
 ### View app errors/logs
 

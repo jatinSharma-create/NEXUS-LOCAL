@@ -27,11 +27,8 @@ function SearchBar({ value, onChange, onClear, loading, resultCount }: SearchBar
 
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-      <div className="relative min-w-0 flex-1">
-        <span
-          className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-muted"
-          aria-hidden="true"
-        >
+      <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded border border-border bg-panel px-3 h-10 focus-within:border-accent transition-colors">
+        <span className="shrink-0 text-muted" aria-hidden="true">
           {loading ? (
             <svg
               className="animate-spin"
@@ -69,9 +66,9 @@ function SearchBar({ value, onChange, onClear, loading, resultCount }: SearchBar
           spellCheck={false}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Search candidates by name, phone, role, or skill…"
+          placeholder="Search by name, phone, role, or skill…"
           aria-label="Search candidates"
-          className="nexus-input h-10 border-0 bg-transparent pl-10 pr-10 shadow-none focus:border-transparent"
+          className="min-w-0 flex-1 border-0 bg-transparent py-0 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-0"
         />
 
         {value && (
@@ -82,7 +79,7 @@ function SearchBar({ value, onChange, onClear, loading, resultCount }: SearchBar
               inputRef.current?.focus();
             }}
             aria-label="Clear search"
-            className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted hover:text-foreground transition-colors"
+            className="shrink-0 text-muted hover:text-foreground transition-colors px-0.5"
           >
             ✕
           </button>
