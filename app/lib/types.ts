@@ -1,11 +1,31 @@
 import type { ParsedJsonBody } from './schemas';
 
+// ── Pipeline stages ────────────────────────────────────────────────────────────
+export const PIPELINE_STAGES = [
+  'new',
+  'contacted',
+  'interviewing',
+  'placed',
+  'rejected',
+] as const;
+
+export type PipelineStage = (typeof PIPELINE_STAGES)[number];
+
+// ── Candidate notes ────────────────────────────────────────────────────────────
+export interface CandidateNote {
+  id: string;
+  candidate_id: string;
+  note_text: string;
+  created_at: Date;
+}
+
+// ── Candidate shapes ───────────────────────────────────────────────────────────
 export interface CandidateListItem {
   id: string;
   name: string;
   email: string | null;
   phone: string;
-  status: string;
+  status: PipelineStage;
   current_role: string | null;
   created_at: Date;
 }
@@ -17,7 +37,7 @@ export interface CandidateRecord {
   phone: string;
   resume_url: string | null;
   parsed_json: ParsedJsonBody | null;
-  status: string;
+  status: PipelineStage;
   last_call_summary: string | null;
   do_not_contact: boolean;
   opt_out_at: Date | null;

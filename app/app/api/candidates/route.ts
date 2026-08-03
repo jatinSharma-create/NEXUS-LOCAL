@@ -1,17 +1,14 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { getCandidates } from '@/lib/candidates';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const result = await query(
-      `SELECT id, name, email, phone, status, parsed_json->>'current_role' as current_role, created_at
-       FROM candidates
-       WHERE deleted_at IS NULL
-       ORDER BY created_at DESC`
-    );
-    return NextResponse.json(result.rows);
+    const { searchParams } = new URL(request.url);
+    const q = searchParams.get('q') ?? undefined;
+    const candidates = await getCandidates(q);
+    return NextResponse.json(candidates);
   } catch (error) {
     console.error('Error fetching candidates:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

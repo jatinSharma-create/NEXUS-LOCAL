@@ -4,10 +4,10 @@ import { getPresignedUrl } from '@/lib/storage';
 import { normalizePhone } from '@/lib/phone';
 import { normalizeEmail } from '@/lib/email';
 import type { CandidateListItem } from '@/lib/types';
+import { PIPELINE_STAGES } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-const VALID_STATUSES = ['new', 'screening', 'interviewing', 'offer', 'hired', 'rejected'];
 const TRASH_RETENTION_DAYS = 30;
 
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
@@ -76,7 +76,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       }
     }
 
-    if (status !== undefined && !VALID_STATUSES.includes(status)) {
+    if (status !== undefined && !PIPELINE_STAGES.includes(status as never)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
     }
 

@@ -7,7 +7,7 @@ CREATE TABLE candidates (
     phone TEXT NOT NULL,
     resume_url TEXT,
     parsed_json JSONB,
-    status TEXT DEFAULT 'new',
+    status TEXT DEFAULT 'new' CHECK (status IN ('new', 'contacted', 'interviewing', 'placed', 'rejected')),
     last_call_summary TEXT,
     do_not_contact BOOLEAN DEFAULT false,
     opt_out_at TIMESTAMPTZ,
@@ -51,3 +51,13 @@ CREATE TABLE calls (
 
 CREATE INDEX calls_candidate_id_idx ON calls(candidate_id);
 CREATE INDEX calls_telnyx_call_control_id_idx ON calls(telnyx_call_control_id);
+
+CREATE TABLE candidate_notes (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    candidate_id UUID        NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+    note_text    TEXT        NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX candidate_notes_candidate_id_created_at_idx
+    ON candidate_notes (candidate_id, created_at DESC);
