@@ -39,9 +39,8 @@ export async function POST(request: Request) {
     }
 
     // Fail fast if ngrok/public URL is missing — otherwise callee answers to silence (no IVR).
-    let webhookUrl: string;
     try {
-      webhookUrl = getTelnyxWebhookUrl();
+      getTelnyxWebhookUrl();
     } catch (err) {
       return NextResponse.json(
         { error: err instanceof Error ? err.message : 'PUBLIC_APP_URL is not configured' },
