@@ -185,11 +185,31 @@ export default async function CandidateProfile({ params }: { params: { id: strin
                             </td>
                             <td className="capitalize whitespace-nowrap">{call.direction}</td>
                             <td className="whitespace-nowrap">{formatDuration(call.duration_seconds)}</td>
-                            <td className="whitespace-nowrap text-muted">{pipelineLabel(state)}</td>
-                            <td className="max-w-xs text-muted">
-                              {state === 'processing' || state === 'generating_pdf'
-                                ? 'Processing…'
-                                : summaryPreview || '—'}
+                            <td className="whitespace-nowrap">
+                              {state === 'failed_needs_review' ? (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400 border border-red-500/20">
+                                  <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                  </svg>
+                                  Failed
+                                </span>
+                              ) : (
+                                <span className="text-muted">{pipelineLabel(state)}</span>
+                              )}
+                            </td>
+                            <td className="max-w-xs">
+                              {state === 'failed_needs_review' ? (
+                                <span className="text-red-400 font-medium text-xs flex items-center gap-1.5">
+                                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                  </svg>
+                                  Needs attention — processing failed
+                                </span>
+                              ) : state === 'processing' || state === 'generating_pdf' ? (
+                                <span className="text-muted">Processing…</span>
+                              ) : (
+                                <span className="text-muted">{summaryPreview || '—'}</span>
+                              )}
                             </td>
                             <td className="text-right">
                               <Link href={`/calls/${call.id}`} className="nexus-link text-xs">

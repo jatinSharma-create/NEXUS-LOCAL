@@ -7,6 +7,7 @@ import {
   callDisplayDate,
   formatDuration,
   getPipelineState,
+  pipelineLabel,
   type CallHistoryItem,
 } from '@/lib/call-helpers';
 
@@ -120,7 +121,7 @@ export default async function CallDetailPage({ params }: { params: { callId: str
             )}
           </div>
 
-          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm border-t border-border pt-4">
+          <dl className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm border-t border-border pt-4">
             <div>
               <dt className="text-muted">Date</dt>
               <dd className="mt-0.5">{displayDate.toLocaleString()}</dd>
@@ -137,8 +138,38 @@ export default async function CallDetailPage({ params }: { params: { callId: str
               <dt className="text-muted">Recording</dt>
               <dd className="mt-0.5">{call.recording_url ? 'Yes' : 'No'}</dd>
             </div>
+            <div>
+              <dt className="text-muted">Status</dt>
+              <dd className="mt-0.5">
+                {state === 'failed_needs_review' ? (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400 border border-red-500/20">
+                    Failed
+                  </span>
+                ) : (
+                  <span className="text-muted">{pipelineLabel(state)}</span>
+                )}
+              </dd>
+            </div>
           </dl>
         </div>
+
+        {state === 'failed_needs_review' && (
+          <div className="nexus-panel p-5 border border-red-500/30 bg-red-500/5">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-red-500/10 text-red-400 mt-0.5 shrink-0">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="font-semibold text-red-400 text-base">Needs attention — processing failed</h2>
+                <p className="text-sm text-muted mt-1 leading-relaxed">
+                  Transcription and summarization failed after all retry attempts. You can listen to the audio recording below for manual review.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {call.recording_url && (
           <div className="nexus-panel p-5">

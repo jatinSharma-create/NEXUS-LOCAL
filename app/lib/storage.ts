@@ -14,8 +14,31 @@ const credentials = {
 
 const BUCKET_NAME = process.env.MINIO_BUCKET || 'nexus';
 
-const internalEndpoint = `http://${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || '9000'}`;
-const publicEndpoint = process.env.MINIO_PUBLIC_ENDPOINT || 'http://localhost:9000';
+/** Full URL override for cloud S3/R2 (e.g. https://xxx.r2.cloudflarestorage.com). */
+function resolveStorageEndpoint(fallbackPublic: boolean): string {
+  const override = process.env.STORAGE_ENDPOINT?.trim();
+  if (override) return override.replace(/\/$/, '');
+
+  const host = process.env.MINIO_ENDPOINT || 'localhost';
+  const port = process.env.MINIO_PORT || '9000';
+  const useSsl =
+    process.env.S3_USE_SSL === 'true' ||
+    port === '443' ||
+    (fallbackPublic && (process.env.MINIO_PUBLIC_ENDPOINT || '').startsWith('https://'));
+
+  if (host.startsWith('http://') || host.startsWith('https://')) {
+    return host.replace(/\/$/, '');
+  }
+
+  const protocol = useSsl ? 'https' : 'http';
+  const omitPort = (useSsl && port === '443') || (!useSsl && port === '80');
+  return omitPort ? `${protocol}://${host}` : `${protocol}://${host}:${port}`;
+}
+
+const internalEndpoint = resolveStorageEndpoint(false);
+const publicEndpoint =
+  process.env.MINIO_PUBLIC_ENDPOINT?.trim().replace(/\/$/, '') ||
+  resolveStorageEndpoint(true);
 
 const s3Client = new S3Client({
   region: 'us-east-1',

@@ -31,13 +31,15 @@ export function callDisplayDate(call: Pick<CallHistoryItem, 'started_at' | 'crea
  * so we track readiness by pipeline fields, not call status.
  */
 export type PipelineState =
-  | 'live'           // call is still in progress
-  | 'processing'     // recording exists but summary_text is null
-  | 'generating_pdf' // summary_text exists but transcript_pdf_url is null
-  | 'ready'          // summary_text and transcript_pdf_url both set
-  | 'no_recording';  // completed without recording (Press 2 / no consent)
+  | 'live'                // call is still in progress
+  | 'processing'          // recording exists but summary_text is null
+  | 'generating_pdf'      // summary_text exists but transcript_pdf_url is null
+  | 'ready'               // summary_text and transcript_pdf_url both set
+  | 'failed_needs_review' // final failure after retry attempts exhausted
+  | 'no_recording';       // completed without recording (Press 2 / no consent)
 
 export function getPipelineState(call: Pick<CallHistoryItem, 'status' | 'recording_url' | 'summary_text' | 'transcript_pdf_url'>): PipelineState {
+  if (call.status === 'failed_needs_review') return 'failed_needs_review';
   const liveStatuses = ['initiating', 'ringing', 'in_progress', 'awaiting_consent'];
   if (liveStatuses.includes(call.status)) return 'live';
   if (!call.recording_url) return 'no_recording';
@@ -56,6 +58,8 @@ export function pipelineLabel(state: PipelineState): string {
       return 'Generating PDF';
     case 'ready':
       return 'Ready';
+    case 'failed_needs_review':
+      return 'Needs attention — processing failed';
     case 'no_recording':
       return 'Not recorded';
   }

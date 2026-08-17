@@ -102,7 +102,9 @@ async function loadCallWithCandidate(callId: string): Promise<CallWithCandidate 
 
 export async function processCallJob(job: Job<CallProcessingJobData>) {
   const { callId, recordingUrl, candidateId, telnyxRecordingId } = job.data;
-  console.log(`[Worker] Processing call job ${job.id} for callId: ${callId}`);
+  const currentAttempt = job.attemptsMade + 1;
+  const maxAttempts = job.opts?.attempts ?? 3;
+  console.log(`[Worker] Processing call job ${job.id} (attempt ${currentAttempt}/${maxAttempts}) for callId: ${callId}`);
 
   if (!recordingUrl) {
     console.warn(`[Worker] Job ${job.id} skipped: No recordingUrl provided`);
@@ -129,7 +131,7 @@ export async function processCallJob(job: Job<CallProcessingJobData>) {
     sentiment: summaryResult.sentiment,
   };
 
-  // ── Step 4: Persist transcript + summary (never touch status) ───────────────
+  // ── Step 4: Persist transcript + summary (on success) ──────────────────────
   if (callId) {
     await query(
       `UPDATE calls
@@ -211,8 +213,32 @@ worker.on('completed', (job) => {
   console.log(`[Worker] Job ${job.id} completed successfully`);
 });
 
-worker.on('failed', (job, err) => {
+worker.on('failed', async (job, err) => {
   console.error(`[Worker] Job ${job?.id} failed with error:`, err);
+  if (job) {
+    const maxAttempts = job.opts?.attempts ?? 3;
+    const isFinalAttempt = job.attemptsMade >= maxAttempts;
+    console.warn(
+      `[Worker] Job ${job.id} failed (attempt ${job.attemptsMade}/${maxAttempts}).${
+        isFinalAttempt ? ' Exhausted all retry attempts.' : ' Scheduled for retry.'
+      }`
+    );
+
+    if (isFinalAttempt) {
+      const { callId } = job.data;
+      if (callId) {
+        try {
+          await query(
+            `UPDATE calls SET status = 'failed_needs_review' WHERE id = $1`,
+            [callId]
+          );
+          console.warn(`[Worker] Call ${callId} status updated to 'failed_needs_review'`);
+        } catch (dbErr) {
+          console.error(`[Worker] Failed to update call ${callId} status to 'failed_needs_review':`, dbErr);
+        }
+      }
+    }
+  }
 });
 
 console.log('[Worker] Call processing worker started and waiting for jobs...');

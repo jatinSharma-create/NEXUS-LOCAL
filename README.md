@@ -8,6 +8,15 @@ By the end, you will have Nexus running on your computer and open in your browse
 
 **Important:** Everything below runs on **your own computer**. Your data stays on your machine.
 
+### Branches
+
+| Branch | Use |
+|--------|-----|
+| **`develop`** | Day-to-day coding and local Docker testing |
+| **`deploy`** | Stable version deployed to the cloud for recruiters |
+
+Recruiters using the **hosted product** do not use Docker — they open a URL. See **[DEPLOYMENT.md](./DEPLOYMENT.md)** (~$5/month hosting guide).
+
 ---
 
 ## What you need before starting

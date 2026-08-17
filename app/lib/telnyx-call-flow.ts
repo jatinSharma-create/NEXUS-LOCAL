@@ -540,12 +540,22 @@ export async function handleWebhookEvent(event: {
         );
 
         try {
-          await getCallProcessingQueue().add('process-call', {
-            callId: callRow.id,
-            recordingUrl,
-            candidateId: candidateId || callRow.candidate_id,
-            telnyxRecordingId,
-          });
+          await getCallProcessingQueue().add(
+            'process-call',
+            {
+              callId: callRow.id,
+              recordingUrl,
+              candidateId: candidateId || callRow.candidate_id,
+              telnyxRecordingId,
+            },
+            {
+              attempts: 3,
+              backoff: {
+                type: 'exponential',
+                delay: 5000,
+              },
+            }
+          );
         } catch (queueErr) {
           console.error('Failed to enqueue call processing job:', queueErr);
         }

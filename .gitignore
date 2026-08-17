@@ -2,6 +2,10 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
+
+# Local-only architecture notes (not for the shared repo)
+TECH_STACK.local.md
 
 # OS / editor
 .DS_Store
