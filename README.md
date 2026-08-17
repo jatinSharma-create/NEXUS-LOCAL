@@ -1,4 +1,26 @@
-# Nexus — Complete beginner setup guide
+# Nexus — Local Candidate Screening Platform
+
+Hey! 👋 I built this project to solve a very specific problem I heard from a recruiter: **"Great ideas and candidate details often get lost right after the screening call."**
+
+As a university student curious about the future, I wanted to stay ahead in this fast-moving era of AI. I decided to see how quickly and effectively I could build a full-stack solution to this exact problem. By leveraging AI tools like **Cursor**, I was able to write the code, debug complex integrations, and ship this project incredibly fast! 🚀
+
+## 💡 The Problem & The Solution
+
+**The Problem:** Recruiters talk to dozens of candidates. During or right after a call, brilliant insights, notes, and specific resume details get lost in the shuffle of tabs, notebooks, and disconnected software.
+
+**The Solution (Nexus):** A streamlined, local-first web application where you can:
+- 📄 **Upload Resumes:** Store and manage candidate PDFs/DOCXs using a local MinIO bucket.
+- 🔍 **Search & Screen:** Instantly find who you're looking for and let Gemini AI extract key resume data automatically.
+- 📞 **Smart AI Calling & Recording:** If you configure your secrets, you can actually **call the candidate directly from the web app**. The app asks for the candidate's consent to record. Once consent is given, the call is recorded, transcribed, and summarized. The summary is then stored permanently as a PDF that you can access at any point in time!
+- 🔒 **Local & Private:** Everything runs entirely on your own computer. Your candidate data never leaves your machine unless you explicitly initiate a call.
+
+Building this taught me a massive amount about combining Docker, Postgres, Redis, and Telnyx (for telephony), all while utilizing AI to accelerate my workflow. 
+
+Below is the original, highly-detailed guide I wrote for absolute beginners to get this running on their own machines using Docker. 🎓✨
+
+---
+
+# Complete Beginner Setup Guide
 
 This guide is for someone who has **never used GitHub, Docker, or coding tools** before.
 
