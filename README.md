@@ -35,9 +35,9 @@ By the end, you will have Nexus running on your computer and open in your browse
 | Branch | Use |
 |--------|-----|
 | **`develop`** | Day-to-day coding and local Docker testing |
-| **`deploy`** | Stable version deployed to the cloud for recruiters |
+| **`deploy`** | Stable release — **clone this on AWS Lightsail** (see DEPLOYMENT.md) |
 
-Recruiters using the **hosted product** do not use Docker — they open a URL. See **[DEPLOYMENT.md](./DEPLOYMENT.md)** (~**$10/month on AWS Lightsail** — overnight deploy guide).
+Recruiters using the hosted product open a URL only (no Docker). **~$10/mo AWS Lightsail** — no domain purchase needed (free sslip.io hostname). See **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
 
 ---
 

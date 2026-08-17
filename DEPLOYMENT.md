@@ -1,293 +1,233 @@
-# Nexus — AWS deployment guide (under $10/month)
+# Nexus — AWS Lightsail deployment (~$10/month)
 
-Deploy Nexus so **recruiters open a URL** — no Docker on their laptops. You run one small AWS server with the same Docker stack you use locally.
+Deploy Nexus so recruiters open a **URL in their browser** — no Docker on their machines.
 
-**Target cost:** **~$10/month** (predictable).  
-**Time:** **2–4 hours** first time; **~15 minutes** for later updates.
-
----
-
-## Why AWS Lightsail (not 6 separate services)
-
-| Approach | Monthly cost | Complexity |
-|----------|--------------|------------|
-| Vercel + Neon + Upstash + R2 + Railway | ~$5–12 | 5 dashboards, 5 env configs |
-| **AWS Lightsail (this guide)** | **~$10** | **1 server, 1 `.env`, same `docker compose`** |
-| EC2 + RDS + ElastiCache + S3 | ~$35+ | Overkill for this stage |
-
-Lightsail runs **app + worker + Postgres + Redis + MinIO + Caddy** on one VM — identical to local dev, tuned for production HTTPS.
-
-**You still pay separately for:** Gemini, Groq, Telnyx (usage-based, same as local).
+| | |
+|--|--|
+| **Cost** | ~**$10/month** (Lightsail 2 GB) — no domain purchase required |
+| **Branch to deploy** | **`deploy`** |
+| **First deploy** | ~2–3 hours overnight |
+| **Updates** | ~15 min (`git pull` + rebuild on server) |
 
 ---
 
-## Monthly cost breakdown (AWS)
+## No domain? Use a free hostname (recommended to start)
 
-| Item | Cost | Notes |
-|------|------|--------|
-| **Lightsail 2 GB plan** | **$10/mo** | 1 vCPU, 60 GB SSD, 3 TB transfer — recommended |
-| Lightsail static IP | $0 | Free while attached |
-| Domain (Route 53 or Namecheap) | ~$1/mo amortized | ~$12/year for `.com` |
-| S3 / RDS / ElastiCache | **$0** | Not needed — everything on the VM |
-| **Typical total** | **~$10–11/mo** | Stays under your $10 hosting target if you already own a domain |
+**AWS Lightsail does not include a free `.com` domain.** You get a **free static IP**, not a website name.
 
-### Cheaper / pricier options
+**Solution: [sslip.io](https://sslip.io)** — free hostnames that point at your IP automatically. No registrar, no DNS panel, no cost.
 
-| Plan | RAM | Price | Verdict |
-|------|-----|-------|---------|
-| $5/mo | 512 MB | Too tight for worker + Chromium |
-| $7/mo | 1 GB | Possible but may OOM on PDF generation |
-| **$10/mo** | **2 GB** | **Recommended — stable overnight deploy** |
-| $20/mo | 4 GB | Use if many concurrent calls + large team |
+If your Lightsail static IP is `54.123.45.67`:
 
-### First 12 months on EC2 instead?
+| Purpose | URL |
+|---------|-----|
+| App (recruiters open this) | `https://54-123-45-67.sslip.io` |
+| File storage (resumes/PDFs) | `https://files.54-123-45-67.sslip.io` |
 
-AWS Free Tier includes **750 hrs/month of t2.micro/t3.micro** — but setup is harder (security groups, EBS, no bundled transfer). Lightsail **$10 flat** is easier for an overnight deploy. EC2 free tier is documented in [Appendix B](#appendix-b-ec2-free-tier-optional).
+Rule: replace **dots with dashes** in the IP, append `.sslip.io`.
 
----
-
-## Architecture on AWS
-
-```text
-Recruiter browser ──HTTPS──► nexus.yourdomain.com ──► Caddy :443 ──► Next.js app
-Telnyx webhooks ──HTTPS──► same URL /api/webhooks/telnyx
-
-On the Lightsail VM (Docker):
-  app ──► db (Postgres)
-  app ──► redis ──► worker (BullMQ + Chromium)
-  app ──► storage (MinIO)
-  files.yourdomain.com ──► Caddy ──► MinIO (resume/PDF downloads)
-```
-
-**End users:** only need `https://nexus.yourdomain.com` + password.
-
----
-
-## Branch strategy
-
-| Branch | Purpose |
-|--------|---------|
-| **`develop`** | Local coding + Docker testing |
-| **`deploy`** | What you put on the AWS server |
+On your laptop (after you know your IP):
 
 ```bash
+./scripts/sslip-hostnames.sh 54.123.45.67
+```
+
+Copy the printed lines into `/opt/nexus/.env` on the server. Caddy will get a **free Let's Encrypt certificate** for that hostname.
+
+When you buy a real domain later, update `.env` + DNS and redeploy — data stays on the server.
+
+---
+
+## Which branch am I on?
+
+| Branch | Use |
+|--------|-----|
+| **`develop`** | Coding on your laptop (Docker Compose locally) |
+| **`deploy`** | **Production server clones this branch only** |
+
+**You are probably on `develop` locally.** That is correct for building features.
+
+**To deploy tonight:**
+
+1. Laptop: merge finished work into `deploy` and push (if needed)
+2. Server: clone **`deploy`** branch — never `develop`
+
+```bash
+# On your laptop (when ready to release)
 git checkout deploy
 git merge develop
 git push origin deploy
-# On server: ./scripts/aws-deploy-update.sh
 ```
 
 ---
 
-## Overnight checklist (print this)
+## What runs on AWS
 
-- [ ] AWS account
-- [ ] Domain you control (or buy one)
-- [ ] Copy API keys from local `.env` (Gemini, Groq, Telnyx)
-- [ ] ~2 hours uninterrupted
+One **Lightsail $10/mo** VM runs the same Docker stack as local dev:
+
+```text
+Recruiter → https://54-123-45-67.sslip.io → Caddy → Next.js app
+Telnyx webhooks → same URL /api/webhooks/telnyx
+
+On the VM:  app + worker + Postgres + Redis + MinIO (all in Docker)
+```
 
 ---
 
-## Step 1 — Create Lightsail instance (~15 min)
+## Step-by-step (no domain purchased)
+
+### Step 1 — Lightsail instance (~15 min)
 
 1. [AWS Lightsail](https://lightsail.aws.amazon.com/) → **Create instance**
-2. **Platform:** Linux/Unix  
-3. **Blueprint:** Ubuntu 22.04 or 24.04 LTS  
-4. **Plan:** **$10/mo — 2 GB RAM, 1 vCPU, 60 GB SSD**
-5. **Name:** `nexus-prod`
-6. Create instance
+2. **Ubuntu 22.04 or 24.04 LTS**
+3. Plan: **$10/mo — 2 GB RAM / 1 vCPU / 60 GB SSD**
+4. Create instance → **Networking** → **Create static IP** → attach
+5. **Write down the IP** (e.g. `54.123.45.67`)
+6. **Firewall:** allow TCP **22**, **80**, **443**
 
-### Attach static IP
+### Step 2 — Hostnames (~2 min)
 
-1. Instance → **Networking** → **Create static IP** → attach to `nexus-prod`
-2. Note the IP (e.g. `54.123.45.67`)
-
-### Open firewall ports
-
-1. Instance → **Networking** → **IPv4 firewall**
-2. Add rules:
-   - **SSH** TCP 22 (restrict to your IP if possible)
-   - **HTTP** TCP 80
-   - **HTTPS** TCP 443
-
----
-
-## Step 2 — DNS (~10 min)
-
-At your domain registrar (Route 53, Cloudflare, Namecheap, etc.), create **A records** pointing to the static IP:
-
-| Host | Type | Value |
-|------|------|--------|
-| `nexus` (or `@`) | A | `54.123.45.67` |
-| `files.nexus` | A | `54.123.45.67` |
-
-Example result:
-
-- App: `https://nexus.yourdomain.com`
-- Files: `https://files.nexus.yourdomain.com`
-
-Wait 5–30 minutes for DNS to propagate. Check:
+On your **laptop** in the repo:
 
 ```bash
-dig +short nexus.yourdomain.com
+./scripts/sslip-hostnames.sh YOUR_STATIC_IP
 ```
 
----
+Save the output — you will paste it into `.env` on the server.
 
-## Step 3 — SSH into the server (~5 min)
+**Skip DNS entirely** with sslip.io.
 
-Lightsail → instance → **Connect using SSH** (browser) or download key:
+### Step 3 — SSH into the server (~5 min)
+
+Lightsail → **Connect using SSH** (browser), or:
 
 ```bash
-ssh -i ~/Downloads/LightsailDefaultKey.pem ubuntu@54.123.45.67
+ssh -i ~/Downloads/LightsailDefaultKey.pem ubuntu@YOUR_STATIC_IP
 ```
 
----
+### Step 4 — Install Nexus (~45 min first build)
 
-## Step 4 — Bootstrap Nexus (~30–45 min)
-
-### Option A — automated script
+On the **server**:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
 sudo git clone --branch deploy https://github.com/jatinSharma-create/NEXUS-LOCAL.git /opt/nexus
 cd /opt/nexus
 sudo cp .env.production.example .env
-sudo nano .env   # fill in everything (see Step 5)
-sudo chmod +x scripts/*.sh
-sudo ./scripts/aws-lightsail-bootstrap.sh
+sudo nano .env
 ```
 
-First run with empty `.env` edits stops after creating `.env`. Edit `.env`, then run bootstrap again.
+Edit `.env`:
 
-### Option B — manual (if script fails)
+1. Paste **sslip.io** values from Step 2 (`DOMAIN`, `FILES_DOMAIN`, `PUBLIC_APP_URL`, `MINIO_PUBLIC_ENDPOINT`)
+2. Set `APP_PASSWORD` (recruiter login)
+3. Set `ACME_EMAIL` (any real email — for Let's Encrypt)
+4. Set `MINIO_SECRET_KEY` (long random string)
+5. Paste API keys from your **local `.env`**: Gemini, Groq, Telnyx
+
+Start:
 
 ```bash
-curl -fsSL https://get.docker.com | sudo sh
-sudo git clone --branch deploy https://github.com/jatinSharma-create/NEXUS-LOCAL.git /opt/nexus
-cd /opt/nexus
-sudo cp .env.production.example .env
-sudo nano .env
+sudo chmod +x scripts/*.sh
 sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-First build takes **15–30 minutes** on a $10 instance.
+First build takes **15–30 minutes**. Watch logs:
 
----
-
-## Step 5 — Configure `.env` on the server
-
-Edit `/opt/nexus/.env`:
-
-```env
-APP_PASSWORD=your-strong-recruiter-password
-
-DOMAIN=nexus.yourdomain.com
-FILES_DOMAIN=files.nexus.yourdomain.com
-ACME_EMAIL=you@yourdomain.com
-
-PUBLIC_APP_URL=https://nexus.yourdomain.com
-MINIO_PUBLIC_ENDPOINT=https://files.nexus.yourdomain.com
-
-MINIO_SECRET_KEY=long-random-minio-password
-
-# Paste from your local .env:
-GOOGLE_GENERATIVE_AI_API_KEY=...
-GROQ_API_KEY=...
-TELNYX_API_KEY=...
-TELNYX_PUBLIC_KEY=...
-TELNYX_CALL_CONTROL_APP_ID=...
-TELNYX_TELEPHONY_CREDENTIAL_ID=...
-TELNYX_CALLER_ID=...
-TELNYX_SIP_URI=...
+```bash
+sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f app
 ```
 
-Leave `DATABASE_URL`, `REDIS_URL`, `MINIO_ENDPOINT` as in `.env.production.example` (Docker internal names).
+### Step 5 — Telnyx webhook (~5 min)
 
----
-
-## Step 6 — Telnyx webhook (~5 min)
-
-Telnyx Mission Control → Call Control App → Webhook URL:
+Telnyx Mission Control → Call Control App → Webhook:
 
 ```text
-https://nexus.yourdomain.com/api/webhooks/telnyx
+https://54-123-45-67.sslip.io/api/webhooks/telnyx
 ```
 
-No ngrok needed — your domain is already public HTTPS.
+(Use **your** sslip.io hostname, not this example.)
+
+### Step 6 — Test (~15 min)
+
+Open in browser:
+
+```text
+https://54-123-45-67.sslip.io
+```
+
+| Test | Expected |
+|------|------------|
+| Login | `APP_PASSWORD` works |
+| Upload resume | Candidate created |
+| Search / notes / status | Works |
+| Call | Phone rings, IVR on handset |
+| After call | Summary + PDF (worker running) |
+
+If HTTPS shows a certificate error, wait 2–3 minutes for Let's Encrypt, ensure ports 80/443 are open, then `docker compose logs caddy`.
 
 ---
 
-## Step 7 — Verify (~20 min)
+## Proceed from where you are now
 
-```bash
-cd /opt/nexus
-docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
-docker compose logs -f app
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  YOUR LAPTOP (branch: develop)                              │
+│  • Keep coding here                                         │
+│  • Test with: docker compose up -d                          │
+│  • When ready: merge develop → deploy → git push            │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│  AWS LIGHTSAIL (branch: deploy)                             │
+│  • One-time: clone /opt/nexus, .env, docker compose up      │
+│  • Updates: ./scripts/aws-deploy-update.sh                  │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│  RECRUITERS                                                 │
+│  • Open https://YOUR-IP-WITH-DASHES.sslip.io                │
+│  • Password: APP_PASSWORD                                   │
+│  • No Docker, no GitHub, no .env                            │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-| Test | URL / action |
-|------|----------------|
-| Login | `https://nexus.yourdomain.com` → password |
-| Upload resume | Candidates → Upload |
-| Search / notes / status | Stage 1 features |
-| Call | Dial candidate → IVR on phone |
-| After call | Summary + PDF on call page |
-| HTTPS on files | Resume download link works |
-
-### Health commands on server
-
-```bash
-docker compose exec db psql -U nexus -d nexus -c '\dt'
-docker compose exec db psql -U nexus -d nexus -c "SELECT COUNT(*) FROM candidates;"
-curl -sI https://nexus.yourdomain.com/login | head -5
-```
+**Tonight:** do Steps 1–6 on AWS. You do **not** need to purchase a domain.
 
 ---
 
-## Updating production (after you merge to `deploy`)
+## Updating production later
 
-**On your laptop:**
+**Laptop:**
 
 ```bash
+git checkout develop
+# ... work, commit ...
 git checkout deploy
 git merge develop
 git push origin deploy
 ```
 
-**On the server:**
+**Server:**
 
 ```bash
 cd /opt/nexus
 sudo ./scripts/aws-deploy-update.sh
 ```
 
-Data is kept in Docker volumes (`pgdata`, `miniodata`, etc.) — same as local `docker compose down` without `-v`.
+Data in Docker volumes is **kept** (same as local — never run `down -v` unless resetting).
 
 ---
 
-## Using AWS to the fullest (without breaking $10)
+## Optional: real domain later
 
-On a single Lightsail box you already use:
-
-| AWS concept | How Nexus uses it |
-|-------------|-------------------|
-| **Compute** | Lightsail VM runs all containers |
-| **Persistent disk** | 60 GB SSD — DB + MinIO + images |
-| **Static IP** | Stable Telnyx webhook target |
-| **Firewall** | Ports 80/443 only public |
-| **HTTPS** | Caddy + Let's Encrypt (free certs) |
-
-### When you outgrow $10 (future, optional)
-
-| Upgrade | When | Extra cost |
-|---------|------|------------|
-| Lightsail **$20** (4 GB) | Many concurrent calls / PDF jobs | +$10/mo |
-| **S3** instead of MinIO | Offload files, snapshot backups | ~$1–3/mo at small scale |
-| **RDS** instead of container Postgres | Need managed backups/HA | ~$15+/mo — skip until needed |
-| **Route 53** health checks | Uptime monitoring | ~$0.50/mo |
-
-For now, **one $10 Lightsail + domain** is the efficient sweet spot.
+1. Buy domain (~$12/year) at any registrar
+2. Create A records → Lightsail static IP for `nexus.yourdomain.com` and `files.nexus.yourdomain.com`
+3. Update `.env` domains + URLs
+4. `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`
+5. Update Telnyx webhook to new URL
 
 ---
 
@@ -295,67 +235,40 @@ For now, **one $10 Lightsail + domain** is the efficient sweet spot.
 
 | Problem | Fix |
 |---------|-----|
-| HTTPS certificate fails | DNS must point to server before Caddy starts; ports 80/443 open |
-| `502` from Caddy | `docker compose logs app` — app still building? |
-| Calls silent / no IVR | `PUBLIC_APP_URL` must match live HTTPS URL; Telnyx webhook correct |
-| OOM / worker crashes | Upgrade to $20 plan or reduce worker `mem_limit` in compose |
-| Resume download fails | Check `FILES_DOMAIN` DNS + `MINIO_PUBLIC_ENDPOINT` match |
-| Login loop | `DOMAIN` in `.env` must match browser hostname |
+| Certificate / HTTPS fails | Ports 80+443 open; `DOMAIN` matches sslip.io hostname exactly |
+| `502` Bad Gateway | App still building — `docker compose logs app` |
+| Calls silent | `PUBLIC_APP_URL` = exact https sslip.io URL; Telnyx webhook matches |
+| Login loop | Browser URL must match `DOMAIN` in `.env` |
+| Worker OOM | Upgrade Lightsail to $20 (4 GB) plan |
 
-### Restart everything
+### Useful commands (on server)
 
 ```bash
 cd /opt/nexus
-docker compose -f docker-compose.yml -f docker-compose.prod.yml restart
-```
-
-### Full reset (deletes all candidate data)
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml down -v
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f worker
+docker compose exec db psql -U nexus -d nexus -c "SELECT COUNT(*) FROM candidates;"
 ```
 
 ---
 
-## Appendix A — Multi-service cloud (previous guide)
-
-If you prefer **not** to manage a server:
-
-- **Vercel** (app) + **Neon** (DB) + **Upstash** (Redis) + **Cloudflare R2** (files) + **Railway** (worker) ≈ **$5/mo** but 5 services to configure.
-
-See git history for the old `DEPLOYMENT.md` or use `app/vercel.json` + `railway.worker.toml` in the repo.
-
----
-
-## Appendix B — EC2 free tier (optional)
-
-If you are in AWS **Free Tier** first year:
-
-1. Launch **t3.micro** or **t4g.micro** (Ubuntu)
-2. Elastic IP + Security Group (22, 80, 443)
-3. Same steps: install Docker, clone repo, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`
-
-Cost after free tier: ~**$8–10/mo** (instance + EBS). More manual than Lightsail.
-
----
-
-## Files reference
+## Repo files (AWS only)
 
 | File | Purpose |
 |------|---------|
 | `DEPLOYMENT.md` | This guide |
-| `docker-compose.prod.yml` | Production overrides (Caddy TLS, lock down MinIO) |
-| `Caddyfile.production` | Let's Encrypt + reverse proxy |
-| `.env.production.example` | Server env template |
-| `scripts/aws-lightsail-bootstrap.sh` | First-time server setup |
+| `docker-compose.prod.yml` | Production Caddy + TLS |
+| `Caddyfile.production` | HTTPS reverse proxy |
+| `.env.production.example` | Server env template (sslip.io default) |
+| `scripts/sslip-hostnames.sh` | Generate free hostnames from IP |
+| `scripts/aws-lightsail-bootstrap.sh` | First-time bootstrap |
 | `scripts/aws-deploy-update.sh` | Pull `deploy` + rebuild |
 
 ---
 
 ## What recruiters need
 
-1. `https://nexus.yourdomain.com`
+1. Your sslip.io URL (or custom domain later)
 2. `APP_PASSWORD`
 
 Nothing else.
