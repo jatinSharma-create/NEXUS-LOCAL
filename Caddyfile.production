@@ -1,0 +1,16 @@
+# Production Caddy — HTTPS via Let's Encrypt.
+# Requires DNS A records for DOMAIN and FILES_DOMAIN pointing at your server IP.
+
+{
+	email {env.ACME_EMAIL}
+}
+
+{env.DOMAIN} {
+	encode gzip
+	reverse_proxy app:3000
+}
+
+{env.FILES_DOMAIN} {
+	encode gzip
+	reverse_proxy storage:9000
+}

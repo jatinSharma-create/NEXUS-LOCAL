@@ -1,0 +1,21 @@
+# Production overrides for AWS Lightsail (or any single VPS).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+services:
+  app:
+    environment:
+      - NODE_ENV=production
+
+  caddy:
+    environment:
+      - DOMAIN=${DOMAIN}
+      - FILES_DOMAIN=${FILES_DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@${DOMAIN}}
+    volumes:
+      - ./Caddyfile.production:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+
+  storage:
+    # MinIO only reachable via Caddy (files.yourdomain.com), not the public internet directly
+    ports: []

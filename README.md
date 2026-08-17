@@ -37,7 +37,7 @@ By the end, you will have Nexus running on your computer and open in your browse
 | **`develop`** | Day-to-day coding and local Docker testing |
 | **`deploy`** | Stable version deployed to the cloud for recruiters |
 
-Recruiters using the **hosted product** do not use Docker — they open a URL. See **[DEPLOYMENT.md](./DEPLOYMENT.md)** (~$5/month hosting guide).
+Recruiters using the **hosted product** do not use Docker — they open a URL. See **[DEPLOYMENT.md](./DEPLOYMENT.md)** (~**$10/month on AWS Lightsail** — overnight deploy guide).
 
 ---
 

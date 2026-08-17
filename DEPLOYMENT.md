@@ -1,261 +1,293 @@
-# Nexus — Cloud deployment guide (cheapest path)
+# Nexus — AWS deployment guide (under $10/month)
 
-Deploy Nexus so **recruiters open a URL in their browser** — no Docker, no terminal, no local setup on their machines.
+Deploy Nexus so **recruiters open a URL** — no Docker on their laptops. You run one small AWS server with the same Docker stack you use locally.
 
-This guide targets **~$0–12/month** using free tiers where possible. Expect **2–4 hours** the first time if you follow the steps in order.
+**Target cost:** **~$10/month** (predictable).  
+**Time:** **2–4 hours** first time; **~15 minutes** for later updates.
+
+---
+
+## Why AWS Lightsail (not 6 separate services)
+
+| Approach | Monthly cost | Complexity |
+|----------|--------------|------------|
+| Vercel + Neon + Upstash + R2 + Railway | ~$5–12 | 5 dashboards, 5 env configs |
+| **AWS Lightsail (this guide)** | **~$10** | **1 server, 1 `.env`, same `docker compose`** |
+| EC2 + RDS + ElastiCache + S3 | ~$35+ | Overkill for this stage |
+
+Lightsail runs **app + worker + Postgres + Redis + MinIO + Caddy** on one VM — identical to local dev, tuned for production HTTPS.
+
+**You still pay separately for:** Gemini, Groq, Telnyx (usage-based, same as local).
+
+---
+
+## Monthly cost breakdown (AWS)
+
+| Item | Cost | Notes |
+|------|------|--------|
+| **Lightsail 2 GB plan** | **$10/mo** | 1 vCPU, 60 GB SSD, 3 TB transfer — recommended |
+| Lightsail static IP | $0 | Free while attached |
+| Domain (Route 53 or Namecheap) | ~$1/mo amortized | ~$12/year for `.com` |
+| S3 / RDS / ElastiCache | **$0** | Not needed — everything on the VM |
+| **Typical total** | **~$10–11/mo** | Stays under your $10 hosting target if you already own a domain |
+
+### Cheaper / pricier options
+
+| Plan | RAM | Price | Verdict |
+|------|-----|-------|---------|
+| $5/mo | 512 MB | Too tight for worker + Chromium |
+| $7/mo | 1 GB | Possible but may OOM on PDF generation |
+| **$10/mo** | **2 GB** | **Recommended — stable overnight deploy** |
+| $20/mo | 4 GB | Use if many concurrent calls + large team |
+
+### First 12 months on EC2 instead?
+
+AWS Free Tier includes **750 hrs/month of t2.micro/t3.micro** — but setup is harder (security groups, EBS, no bundled transfer). Lightsail **$10 flat** is easier for an overnight deploy. EC2 free tier is documented in [Appendix B](#appendix-b-ec2-free-tier-optional).
+
+---
+
+## Architecture on AWS
+
+```text
+Recruiter browser ──HTTPS──► nexus.yourdomain.com ──► Caddy :443 ──► Next.js app
+Telnyx webhooks ──HTTPS──► same URL /api/webhooks/telnyx
+
+On the Lightsail VM (Docker):
+  app ──► db (Postgres)
+  app ──► redis ──► worker (BullMQ + Chromium)
+  app ──► storage (MinIO)
+  files.yourdomain.com ──► Caddy ──► MinIO (resume/PDF downloads)
+```
+
+**End users:** only need `https://nexus.yourdomain.com` + password.
 
 ---
 
 ## Branch strategy
 
-| Branch | Purpose | Who uses it |
-|--------|---------|-------------|
-| **`develop`** | Active development — new features, experiments, may break | Developers only |
-| **`deploy`** | Stable release — what production runs | Deploy **this** branch to Vercel/Railway |
-
-### Day-to-day workflow
-
-```text
-develop  ──merge when stable──►  deploy  ──auto/manual deploy──►  Production URL
-   ▲
-   └── all feature work happens here
-```
-
-1. Build and test locally on `develop` (Docker Compose — see README.md).
-2. When a version is ready for users, merge `develop` → `deploy`.
-3. Vercel + Railway redeploy from `deploy` (automatic if GitHub integration is on).
+| Branch | Purpose |
+|--------|---------|
+| **`develop`** | Local coding + Docker testing |
+| **`deploy`** | What you put on the AWS server |
 
 ```bash
 git checkout deploy
 git merge develop
 git push origin deploy
+# On server: ./scripts/aws-deploy-update.sh
 ```
 
-**End users never clone the repo.** They only visit your Vercel URL and log in with `APP_PASSWORD`.
+---
+
+## Overnight checklist (print this)
+
+- [ ] AWS account
+- [ ] Domain you control (or buy one)
+- [ ] Copy API keys from local `.env` (Gemini, Groq, Telnyx)
+- [ ] ~2 hours uninterrupted
 
 ---
 
-## Production architecture (no Docker for users)
+## Step 1 — Create Lightsail instance (~15 min)
 
-```text
-Recruiter browser
-       │
-       ▼
-┌──────────────────┐     webhooks      ┌─────────┐
-│  Vercel (free)   │◄──────────────────│ Telnyx  │
-│  Next.js app     │                   └─────────┘
-└────────┬─────────┘
-         │
-    ┌────┼────┬────────────┐
-    ▼    ▼    ▼            ▼
-  Neon  Upstash  Cloudflare  Railway (~$5/mo)
-  Postgres Redis    R2       BullMQ worker
-  (free)  (free)  (free)     + Chromium/PDF
-```
+1. [AWS Lightsail](https://lightsail.aws.amazon.com/) → **Create instance**
+2. **Platform:** Linux/Unix  
+3. **Blueprint:** Ubuntu 22.04 or 24.04 LTS  
+4. **Plan:** **$10/mo — 2 GB RAM, 1 vCPU, 60 GB SSD**
+5. **Name:** `nexus-prod`
+6. Create instance
 
-| Piece | Provider | Why this one |
-|-------|----------|--------------|
-| Web app + API | **Vercel** | Native Next.js, HTTPS, free hobby tier |
-| Database | **Neon** | Serverless Postgres, generous free tier |
-| Job queue | **Upstash Redis** | Serverless Redis, free tier, works with BullMQ |
-| File storage | **Cloudflare R2** | S3-compatible, free egress, cheap storage |
-| Background worker | **Railway** | Runs Dockerfile `worker` stage (Puppeteer/Chromium) — Vercel cannot run this |
+### Attach static IP
 
-**What you already pay for (not hosting):** Gemini API, Groq API, Telnyx — same as local dev.
+1. Instance → **Networking** → **Create static IP** → attach to `nexus-prod`
+2. Note the IP (e.g. `54.123.45.67`)
 
-### Estimated monthly cost
+### Open firewall ports
 
-| Service | Typical cost |
-|---------|----------------|
-| Vercel Hobby | **$0** |
-| Neon Free | **$0** (limits apply) |
-| Upstash Free | **$0** (10k cmds/day) |
-| Cloudflare R2 | **$0** (10 GB storage free) |
-| Railway Worker | **~$5** (Hobby plan + usage) |
-| **Total hosting** | **~$5/month** |
-
-If you skip calling/transcription temporarily, you could run **app-only on Vercel for $0** (upload + candidates + notes still work; post-call processing needs the worker).
+1. Instance → **Networking** → **IPv4 firewall**
+2. Add rules:
+   - **SSH** TCP 22 (restrict to your IP if possible)
+   - **HTTP** TCP 80
+   - **HTTPS** TCP 443
 
 ---
 
-## Before you start — accounts checklist
+## Step 2 — DNS (~10 min)
 
-Create (all have free signup):
+At your domain registrar (Route 53, Cloudflare, Namecheap, etc.), create **A records** pointing to the static IP:
 
-- [ ] [GitHub](https://github.com) — repo access
-- [ ] [Vercel](https://vercel.com) — connect GitHub
-- [ ] [Neon](https://neon.tech) — Postgres
-- [ ] [Upstash](https://upstash.com) — Redis
-- [ ] [Cloudflare](https://cloudflare.com) — R2 bucket
-- [ ] [Railway](https://railway.app) — worker service
-- [ ] Telnyx + Gemini + Groq keys (same as local `.env`)
+| Host | Type | Value |
+|------|------|--------|
+| `nexus` (or `@`) | A | `54.123.45.67` |
+| `files.nexus` | A | `54.123.45.67` |
 
----
+Example result:
 
-## Step 1 — Database (Neon) ~20 min
+- App: `https://nexus.yourdomain.com`
+- Files: `https://files.nexus.yourdomain.com`
 
-1. Neon → **New Project** → name `nexus-prod`.
-2. Copy the **pooled** connection string (`postgres://...?sslmode=require`).
-3. On your laptop (needs `psql` — `brew install libpq` on Mac):
+Wait 5–30 minutes for DNS to propagate. Check:
 
 ```bash
-cd NEXUS-LOCAL
-git checkout deploy
-export DATABASE_URL='postgres://USER:PASS@HOST/nexus?sslmode=require'
-chmod +x scripts/run-neon-init.sh
-./scripts/run-neon-init.sh
+dig +short nexus.yourdomain.com
 ```
 
-4. Confirm tables:
+---
+
+## Step 3 — SSH into the server (~5 min)
+
+Lightsail → instance → **Connect using SSH** (browser) or download key:
 
 ```bash
-psql "$DATABASE_URL" -c '\dt'
+ssh -i ~/Downloads/LightsailDefaultKey.pem ubuntu@54.123.45.67
 ```
 
-You should see `candidates`, `calls`, `candidate_notes`.
+---
+
+## Step 4 — Bootstrap Nexus (~30–45 min)
+
+### Option A — automated script
+
+```bash
+sudo apt-get update && sudo apt-get install -y git
+sudo git clone --branch deploy https://github.com/jatinSharma-create/NEXUS-LOCAL.git /opt/nexus
+cd /opt/nexus
+sudo cp .env.production.example .env
+sudo nano .env   # fill in everything (see Step 5)
+sudo chmod +x scripts/*.sh
+sudo ./scripts/aws-lightsail-bootstrap.sh
+```
+
+First run with empty `.env` edits stops after creating `.env`. Edit `.env`, then run bootstrap again.
+
+### Option B — manual (if script fails)
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo git clone --branch deploy https://github.com/jatinSharma-create/NEXUS-LOCAL.git /opt/nexus
+cd /opt/nexus
+sudo cp .env.production.example .env
+sudo nano .env
+sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+First build takes **15–30 minutes** on a $10 instance.
 
 ---
 
-## Step 2 — Redis (Upstash) ~10 min
+## Step 5 — Configure `.env` on the server
 
-1. Upstash → **Create database** → type **Regional**, region close to your users.
-2. Copy **Redis URL** (`rediss://default:...@....upstash.io:6379`).
-3. Save as `REDIS_URL` for Vercel and Railway.
-
----
-
-## Step 3 — Object storage (Cloudflare R2) ~20 min
-
-1. Cloudflare Dashboard → **R2** → **Create bucket** → name `nexus`.
-2. **Manage R2 API tokens** → Create token with Object Read & Write on that bucket.
-3. Note:
-   - Access Key ID → `MINIO_ACCESS_KEY`
-   - Secret Access Key → `MINIO_SECRET_KEY`
-   - Account ID → used in endpoint URL
-
-4. Set these env vars (Vercel + Railway + worker):
+Edit `/opt/nexus/.env`:
 
 ```env
-MINIO_BUCKET=nexus
-MINIO_ACCESS_KEY=<r2 access key>
-MINIO_SECRET_KEY=<r2 secret>
-STORAGE_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
-S3_USE_SSL=true
-MINIO_PUBLIC_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+APP_PASSWORD=your-strong-recruiter-password
+
+DOMAIN=nexus.yourdomain.com
+FILES_DOMAIN=files.nexus.yourdomain.com
+ACME_EMAIL=you@yourdomain.com
+
+PUBLIC_APP_URL=https://nexus.yourdomain.com
+MINIO_PUBLIC_ENDPOINT=https://files.nexus.yourdomain.com
+
+MINIO_SECRET_KEY=long-random-minio-password
+
+# Paste from your local .env:
+GOOGLE_GENERATIVE_AI_API_KEY=...
+GROQ_API_KEY=...
+TELNYX_API_KEY=...
+TELNYX_PUBLIC_KEY=...
+TELNYX_CALL_CONTROL_APP_ID=...
+TELNYX_TELEPHONY_CREDENTIAL_ID=...
+TELNYX_CALLER_ID=...
+TELNYX_SIP_URI=...
 ```
 
-Optional: enable R2 public custom domain later for simpler presigned URLs.
+Leave `DATABASE_URL`, `REDIS_URL`, `MINIO_ENDPOINT` as in `.env.production.example` (Docker internal names).
 
 ---
 
-## Step 4 — Deploy web app (Vercel) ~30 min
+## Step 6 — Telnyx webhook (~5 min)
 
-1. Vercel → **Add New Project** → Import `NEXUS-LOCAL` from GitHub.
-2. **Production branch:** `deploy` (not `main` or `develop`).
-3. **Root Directory:** `app` ← important.
-4. Framework: Next.js (auto-detected).
-5. Add **Environment Variables** (Production):
+Telnyx Mission Control → Call Control App → Webhook URL:
 
-| Variable | Value |
-|----------|--------|
-| `APP_PASSWORD` | Strong password for recruiters |
-| `DOMAIN` | Your Vercel domain, e.g. `nexus.vercel.app` |
-| `NODE_ENV` | `production` |
-| `DATABASE_URL` | Neon pooled URL |
-| `REDIS_URL` | Upstash URL |
-| `MINIO_*` / `STORAGE_ENDPOINT` | From Step 3 |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini key |
-| `GOOGLE_GENERATIVE_AI_MODEL` | `gemini-2.5-flash-lite` |
-| `GROQ_API_KEY` | Groq key |
-| `GROQ_STT_MODEL` | `whisper-large-v3-turbo` |
-| `STT_PROVIDER` | `groq` |
-| `TELNYX_*` | Same as local `.env` |
-| `PUBLIC_APP_URL` | `https://your-app.vercel.app` (no trailing slash) |
-| `NEXUS_COMPANY_NAME` | Your company name |
-| `RECORDING_ENABLED` | `true` |
-| `CONSENT_GATHER_TIMEOUT_SECS` | `10` |
-| `CONSENT_MAX_RETRIES` | `2` |
-
-6. **Deploy**.
-
-7. Copy your live URL, e.g. `https://nexus-xxx.vercel.app` — update `PUBLIC_APP_URL` in Vercel if you used a placeholder, then **Redeploy**.
-
-8. Test login: open URL → `/login` → `APP_PASSWORD`.
-
----
-
-## Step 5 — Deploy worker (Railway) ~45 min
-
-The worker processes call recordings (transcribe → summarize → PDF). It **must** run 24/7 as a separate service.
-
-1. Railway → **New Project** → **Deploy from GitHub repo** → select `NEXUS-LOCAL`, branch **`deploy`**.
-2. Add a **service** using **Dockerfile**:
-   - Dockerfile path: `app/Dockerfile`
-   - Build target: **`worker`** (set in Railway service settings → Build → Dockerfile target)
-3. Copy the **same env vars** as Vercel (DATABASE_URL, REDIS_URL, storage, Gemini, Groq, Telnyx) into Railway → Variables.
-4. `PUBLIC_APP_URL` is not required on worker, but harmless if set.
-5. Deploy and check logs: should see `[Worker] Call processing worker started...`
-
-**Memory:** worker needs Chromium — Railway 512MB may be tight; use **1 GB** if PDF generation fails.
-
----
-
-## Step 6 — Telnyx webhooks ~15 min
-
-1. Telnyx Mission Control → **Call Control Application** → your app.
-2. **Webhook URL:** `https://your-app.vercel.app/api/webhooks/telnyx`
-3. Save.
-
-No ngrok needed in production — Vercel URL is already public HTTPS.
-
-Test:
-
-```bash
-curl -s https://your-app.vercel.app/api/health/calling
+```text
+https://nexus.yourdomain.com/api/webhooks/telnyx
 ```
 
-(Requires auth cookie locally; in production check Vercel logs after a test call.)
+No ngrok needed — your domain is already public HTTPS.
 
 ---
 
-## Step 7 — Smoke test ~30 min
-
-| Test | Expected |
-|------|----------|
-| Login | Password gate works |
-| Upload resume | Candidate created (Gemini) |
-| Search / status / notes | Stage 1 features work |
-| Place call | Phone rings, IVR on handset |
-| After call | Worker logs show job; summary appears on call page |
-| Failed processing | After 3 retries, “Needs attention — processing failed” |
-
----
-
-## Updating production later
+## Step 7 — Verify (~20 min)
 
 ```bash
-# On develop — build features
-git checkout develop
-# ... work, commit, push ...
+cd /opt/nexus
+docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+docker compose logs -f app
+```
 
-# When ready for users
+| Test | URL / action |
+|------|----------------|
+| Login | `https://nexus.yourdomain.com` → password |
+| Upload resume | Candidates → Upload |
+| Search / notes / status | Stage 1 features |
+| Call | Dial candidate → IVR on phone |
+| After call | Summary + PDF on call page |
+| HTTPS on files | Resume download link works |
+
+### Health commands on server
+
+```bash
+docker compose exec db psql -U nexus -d nexus -c '\dt'
+docker compose exec db psql -U nexus -d nexus -c "SELECT COUNT(*) FROM candidates;"
+curl -sI https://nexus.yourdomain.com/login | head -5
+```
+
+---
+
+## Updating production (after you merge to `deploy`)
+
+**On your laptop:**
+
+```bash
 git checkout deploy
 git merge develop
 git push origin deploy
 ```
 
-Vercel and Railway redeploy automatically if GitHub integration is enabled.
+**On the server:**
 
-**Data is safe:** Neon and R2 are unchanged by deploys. Never drop Neon DB unless you mean to reset production data.
+```bash
+cd /opt/nexus
+sudo ./scripts/aws-deploy-update.sh
+```
+
+Data is kept in Docker volumes (`pgdata`, `miniodata`, etc.) — same as local `docker compose down` without `-v`.
 
 ---
 
-## What recruiters (end users) need
+## Using AWS to the fullest (without breaking $10)
 
-1. The URL (e.g. `https://nexus.vercel.app`)
-2. The shared `APP_PASSWORD`
+On a single Lightsail box you already use:
 
-That is all. No Git, Docker, or `.env` on their side.
+| AWS concept | How Nexus uses it |
+|-------------|-------------------|
+| **Compute** | Lightsail VM runs all containers |
+| **Persistent disk** | 60 GB SSD — DB + MinIO + images |
+| **Static IP** | Stable Telnyx webhook target |
+| **Firewall** | Ports 80/443 only public |
+| **HTTPS** | Caddy + Let's Encrypt (free certs) |
+
+### When you outgrow $10 (future, optional)
+
+| Upgrade | When | Extra cost |
+|---------|------|------------|
+| Lightsail **$20** (4 GB) | Many concurrent calls / PDF jobs | +$10/mo |
+| **S3** instead of MinIO | Offload files, snapshot backups | ~$1–3/mo at small scale |
+| **RDS** instead of container Postgres | Need managed backups/HA | ~$15+/mo — skip until needed |
+| **Route 53** health checks | Uptime monitoring | ~$0.50/mo |
+
+For now, **one $10 Lightsail + domain** is the efficient sweet spot.
 
 ---
 
@@ -263,51 +295,67 @@ That is all. No Git, Docker, or `.env` on their side.
 
 | Problem | Fix |
 |---------|-----|
-| Login works locally but not Vercel | Set `DOMAIN` to your Vercel hostname; cookie uses `secure` in production |
-| Calls ring but no IVR | `PUBLIC_APP_URL` must be exact Vercel HTTPS URL; Telnyx webhook must match |
-| Upload fails | Check Gemini key + Vercel function logs |
-| Call stuck “Processing…” | Railway worker down or wrong `REDIS_URL`; check Railway logs |
-| PDF fails | Increase Railway memory; check Chromium in worker logs |
-| Storage errors | Verify R2 `STORAGE_ENDPOINT` and keys |
+| HTTPS certificate fails | DNS must point to server before Caddy starts; ports 80/443 open |
+| `502` from Caddy | `docker compose logs app` — app still building? |
+| Calls silent / no IVR | `PUBLIC_APP_URL` must match live HTTPS URL; Telnyx webhook correct |
+| OOM / worker crashes | Upgrade to $20 plan or reduce worker `mem_limit` in compose |
+| Resume download fails | Check `FILES_DOMAIN` DNS + `MINIO_PUBLIC_ENDPOINT` match |
+| Login loop | `DOMAIN` in `.env` must match browser hostname |
+
+### Restart everything
+
+```bash
+cd /opt/nexus
+docker compose -f docker-compose.yml -f docker-compose.prod.yml restart
+```
+
+### Full reset (deletes all candidate data)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml down -v
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
 
 ---
 
-## Alternative: even cheaper (app-only, $0 hosting)
+## Appendix A — Multi-service cloud (previous guide)
 
-Deploy **only Vercel + Neon + R2** — skip Railway worker and calling:
+If you prefer **not** to manage a server:
 
-- Recruiters can upload resumes, search, notes, status.
-- No live calls or post-call AI until you add Railway later.
+- **Vercel** (app) + **Neon** (DB) + **Upstash** (Redis) + **Cloudflare R2** (files) + **Railway** (worker) ≈ **$5/mo** but 5 services to configure.
+
+See git history for the old `DEPLOYMENT.md` or use `app/vercel.json` + `railway.worker.toml` in the repo.
 
 ---
 
-## Files in this repo for deployment
+## Appendix B — EC2 free tier (optional)
+
+If you are in AWS **Free Tier** first year:
+
+1. Launch **t3.micro** or **t4g.micro** (Ubuntu)
+2. Elastic IP + Security Group (22, 80, 443)
+3. Same steps: install Docker, clone repo, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`
+
+Cost after free tier: ~**$8–10/mo** (instance + EBS). More manual than Lightsail.
+
+---
+
+## Files reference
 
 | File | Purpose |
 |------|---------|
 | `DEPLOYMENT.md` | This guide |
-| `app/vercel.json` | Vercel Next.js hint |
-| `railway.worker.toml` | Railway worker reference |
-| `scripts/run-neon-init.sh` | Apply schema to hosted Postgres |
-| `.env.example` | Local Docker template |
-| `.env.production.example` | Cloud env var checklist |
+| `docker-compose.prod.yml` | Production overrides (Caddy TLS, lock down MinIO) |
+| `Caddyfile.production` | Let's Encrypt + reverse proxy |
+| `.env.production.example` | Server env template |
+| `scripts/aws-lightsail-bootstrap.sh` | First-time server setup |
+| `scripts/aws-deploy-update.sh` | Pull `deploy` + rebuild |
 
 ---
 
-## Branch setup (one-time, for maintainers)
+## What recruiters need
 
-Already configured in GitHub:
+1. `https://nexus.yourdomain.com`
+2. `APP_PASSWORD`
 
-- **`develop`** — default for coding
-- **`deploy`** — connected to Vercel/Railway production
-
-To recreate on a new clone:
-
-```bash
-git checkout -b develop
-git push -u origin develop
-git checkout -b deploy
-git push -u origin deploy
-```
-
-Set GitHub **default branch** to `develop` if you want PRs to target development first.
+Nothing else.
