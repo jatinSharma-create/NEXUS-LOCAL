@@ -9,8 +9,8 @@ services:
       - storage
       - redis
     ports:
-      # Direct access if Caddy/HTTPS is awkward: http://localhost:3000
-      - "127.0.0.1:3000:3000"
+      # Direct access if Caddy/HTTPS is awkward. Override APP_PORT in .env if 3000 is taken.
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
     networks:
       - internal
     environment:
@@ -119,8 +119,9 @@ services:
     environment:
       - DOMAIN=${DOMAIN}
     ports:
-      - "80:80"
-      - "443:443"
+      # Override HTTP_PORT / HTTPS_PORT in .env when another app owns 80/443.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       # Local HTTP only (ngrok-friendly). See Caddyfile.local.
       - ./Caddyfile.local:/etc/caddy/Caddyfile

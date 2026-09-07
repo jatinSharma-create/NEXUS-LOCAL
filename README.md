@@ -53,6 +53,56 @@ You do **not** need to know how to code.
 
 ---
 
+## For the person SHARING Nexus — what to hand over
+
+If you already run Nexus and want someone else to have the **exact same working app**, give them these five things.
+
+### 1. The repo link
+
+```text
+https://github.com/jatinSharma-create/NEXUS-LOCAL
+```
+
+If the repo is private, invite their GitHub username as a collaborator.
+
+### 2. The `.env` file (most important)
+
+Send your working `.env` **privately** (AirDrop, password manager, encrypted email — never a public chat). Without it, the app starts but resume upload and calling will not work.
+
+The `.env` must contain values for:
+
+| Setting | Needed for | Where you got it |
+|---------|-----------|------------------|
+| `APP_PASSWORD` | Logging into Nexus | You choose it |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Resume parsing, call summaries | https://aistudio.google.com/apikey |
+| `GROQ_API_KEY` | Call transcription | https://console.groq.com/keys |
+| `TELNYX_API_KEY` | Calling | Telnyx Mission Control |
+| `TELNYX_PUBLIC_KEY` | Verifying call webhooks | Telnyx Mission Control |
+| `TELNYX_CALL_CONTROL_APP_ID` | Calling | Telnyx Mission Control |
+| `TELNYX_TELEPHONY_CREDENTIAL_ID` | Browser calling (WebRTC) | Telnyx Mission Control |
+| `TELNYX_CALLER_ID` | The number calls come from | Telnyx phone number |
+| `TELNYX_SIP_URI` | Connecting your browser to the call | Telnyx SIP credential |
+| `MINIO_*`, `DATABASE_URL`, `REDIS_URL` | Internal storage/database | Leave at defaults |
+
+**Sharing API keys means they use your quota/billing.** If you would rather not share, tell them to create their own free Gemini and Groq keys and paste those in instead — everything except calling works with just a Gemini key.
+
+### 3. The login password
+
+Tell them the `APP_PASSWORD` value from the `.env` you sent.
+
+### 4. This README
+
+They should follow it top to bottom. Point them at **Part A**.
+
+### 5. What is NOT shared
+
+- **Your candidate data does not travel with the app.** They start with an empty database.
+- Resumes, notes, and call recordings stay on whoever's computer created them.
+
+> Want them to skip Docker entirely? Deploy Nexus to a server instead and just send them a URL + password — see **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+
+---
+
 ## Big picture (what you will do)
 
 1. Install **Docker Desktop** (runs the app in containers).
@@ -410,6 +460,24 @@ MinIO login (if needed):
 - Password: `password123`  
   (unless your shared `.env` changed these)
 
+### If another app on your computer already uses these ports
+
+Nexus reads its ports from `.env`, so you can move it without editing any code. Open `.env` and set:
+
+```env
+HTTP_PORT=8080
+HTTPS_PORT=8443
+APP_PORT=3001
+```
+
+Then restart:
+
+```bash
+docker compose up -d
+```
+
+Nexus now lives at **http://localhost:8080** (and http://localhost:3001 for direct access). Pick any free numbers you like — just use the same ones in your browser.
+
 ---
 
 ## Part H — What you can do once it is running
@@ -626,12 +694,24 @@ You can ignore SSH completely if HTTPS works.
 3. Wait 30–60 seconds after starting (app may still be booting)
 4. Run: `docker compose up -d`
 
-### Port 80 is already in use
+### Port 80 (or 3000) is already in use
 
-Something else on your computer is using port 80. Ask a teammate for help, or use:
+Another program on your computer owns that port. Open `.env`, add or edit these lines, then run `docker compose up -d`:
 
-```text
-http://localhost:3000
+```env
+HTTP_PORT=8080
+HTTPS_PORT=8443
+APP_PORT=3001
+```
+
+Then open **http://localhost:8080** instead. To see what is using a port:
+
+```bash
+# Mac
+lsof -nP -iTCP:80 -sTCP:LISTEN
+
+# Windows PowerShell
+netstat -ano | findstr :80
 ```
 
 ### Login fails
@@ -670,16 +750,29 @@ ls -la .env
 
 ## Quick checklist
 
+**Setup**
+
 - [ ] Docker Desktop installed and running
 - [ ] `docker --version` works
 - [ ] Git installed (`git --version` works)
 - [ ] Project cloned into `NEXUS-LOCAL`
 - [ ] `.env` file placed inside `NEXUS-LOCAL`
 - [ ] Ran `docker compose up -d --build`
+- [ ] `docker compose ps` shows app, db, redis, storage, caddy, worker
 - [ ] Opened http://localhost
 - [ ] Logged in with `APP_PASSWORD`
 
-If all boxes are checked, you are done.
+**Prove it actually works**
+
+- [ ] Uploaded a resume (PDF or DOCX) and a candidate appeared → Gemini key is good
+- [ ] Typed in the search bar and the list filtered
+- [ ] Opened a candidate, changed their status in the dropdown
+- [ ] Added a note and it showed with a timestamp
+- [ ] Refreshed the page and everything was still there → database is working
+
+If all boxes are checked, your install matches a working one.
+
+Calling is the only feature that needs extra setup beyond this — see the note in **Part H**.
 
 ---
 
