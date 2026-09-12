@@ -21,12 +21,12 @@ Keep entries short: what the file is for, not a diff.
 
 ## Current state
 
-- **Branch:** `develop` (merge this onto `deploy` to go live)
-- **Status:** modular stack + live-call fixes, documented in `GO_LIVE.md`.
+- **Branch:** `develop` (local checkout). `origin/develop` and `origin/deploy`
+  both point at `fa4ebd4`.
+- **Status:** modular stack is committed and pushed. Go live with `GO_LIVE.md`.
   Share a public HTTPS URL + `APP_PASSWORD`; do not share `.env`.
 - **Most recent work:** vendor-neutral modules, recruiter-leg consent fix,
   honest dialer copy during IVR, Lightsail go-live guide.
-- **Last commit on branch:** this commit.
 
 ---
 
