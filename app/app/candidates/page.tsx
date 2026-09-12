@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { AppShell } from '@/components/AppShell';
 import { CandidatesTable } from '@/components/CandidatesTable';
-import { getCandidates } from '@/lib/candidates';
+import { candidatesRepo } from '@/modules/data';
 
 export const dynamic = 'force-dynamic';
 
 export default async function CandidatesPage() {
-  const candidates = await getCandidates();
+  const candidates = await candidatesRepo.getCandidates();
 
   return (
     <AppShell

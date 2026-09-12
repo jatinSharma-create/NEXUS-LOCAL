@@ -15,6 +15,7 @@ export interface CallHistoryItem {
   summary_text: string | null;
   key_points: unknown;
   consent_confirmed: boolean | null;
+  consent_method: string | null;
   transcript_pdf_url: string | null;
 }
 

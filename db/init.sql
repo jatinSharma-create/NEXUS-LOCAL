@@ -22,11 +22,15 @@ CREATE TABLE candidates (
 
 CREATE UNIQUE INDEX candidates_phone_active_idx ON candidates(phone) WHERE deleted_at IS NULL;
 
+-- Call identifiers are provider-neutral: `provider` records which telephony
+-- vendor placed the call, and the *_provider_call_id columns hold whatever
+-- identifier that vendor uses.
 CREATE TABLE calls (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     candidate_id UUID REFERENCES candidates(id) ON DELETE CASCADE,
-    telnyx_call_control_id TEXT,
-    client_state TEXT,
+    provider TEXT,
+    provider_call_id TEXT,
+    agent_provider_call_id TEXT,
     recording_url TEXT,
     transcript_text TEXT,
     transcript_pdf_url TEXT,
@@ -41,7 +45,7 @@ CREATE TABLE calls (
     consent_at TIMESTAMPTZ,
     consent_retries INT DEFAULT 0,
     recording_started_at TIMESTAMPTZ,
-    telnyx_recording_id TEXT,
+    provider_recording_id TEXT,
     hangup_cause TEXT,
     status TEXT DEFAULT 'initiating',
     started_at TIMESTAMPTZ,
@@ -50,7 +54,25 @@ CREATE TABLE calls (
 );
 
 CREATE INDEX calls_candidate_id_idx ON calls(candidate_id);
-CREATE INDEX calls_telnyx_call_control_id_idx ON calls(telnyx_call_control_id);
+CREATE INDEX calls_provider_call_id_idx ON calls(provider_call_id);
+CREATE INDEX calls_agent_provider_call_id_idx ON calls(agent_provider_call_id);
+
+-- Per-leg call state, keyed by the provider's own call id.
+--
+-- Replaces two things that were previously Telnyx-shaped: the `client_state`
+-- blob Telnyx echoed back on every webhook (no other vendor offers one), and
+-- the in-memory Sets that tracked IVR progress inside a single app process.
+CREATE TABLE call_sessions (
+    provider_call_id TEXT PRIMARY KEY,
+    call_id UUID REFERENCES calls(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    leg TEXT NOT NULL CHECK (leg IN ('candidate', 'agent', 'inbound')),
+    state JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX call_sessions_call_id_idx ON call_sessions(call_id);
 
 CREATE TABLE candidate_notes (
     id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,3 +1,43 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": [
+              "@/modules/*/core/*",
+              "@/modules/*/providers/*",
+              "@/modules/*/infra/*",
+              "@/modules/*/templates/*",
+              "@/modules/*/repositories/*"
+            ],
+            "message": "Reach for the module's public entry point (e.g. @/modules/voice) instead of its internals."
+          },
+          {
+            "group": [
+              "pg",
+              "@telnyx/*",
+              "telnyx",
+              "twilio",
+              "@twilio/*",
+              "groq-sdk",
+              "ai",
+              "@ai-sdk/*",
+              "@aws-sdk/*",
+              "puppeteer-core"
+            ],
+            "message": "Vendor SDKs belong inside app/modules/<capability>/providers/ (or modules/data for the database driver). Depend on the module's port instead."
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["modules/*/providers/**", "modules/data/**"],
+      "rules": { "no-restricted-imports": "off" }
+    }
+  ]
 }

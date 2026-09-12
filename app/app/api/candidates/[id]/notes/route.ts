@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getCandidateNotes, addCandidateNote } from '@/lib/candidates';
+import { notesRepo } from '@/modules/data';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
   try {
-    const notes = await getCandidateNotes(params.id);
+    const notes = await notesRepo.getCandidateNotes(params.id);
     return NextResponse.json(notes);
   } catch (error) {
     console.error('Error fetching candidate notes:', error);
@@ -22,7 +22,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return NextResponse.json({ error: 'noteText must not be empty' }, { status: 400 });
     }
 
-    const note = await addCandidateNote(params.id, noteText);
+    const note = await notesRepo.addCandidateNote(params.id, noteText);
     return NextResponse.json(note, { status: 201 });
   } catch (error) {
     console.error('Error adding candidate note:', error);

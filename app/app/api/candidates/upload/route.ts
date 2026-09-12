@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { parseResume } from '@/lib/llm';
-import { normalizePhone } from '@/lib/phone';
-import { normalizeEmail } from '@/lib/email';
-import { query } from '@/lib/db';
-import { uploadFile } from '@/lib/storage';
-import { toParsedJsonBody } from '@/lib/schemas';
 import { randomUUID } from 'crypto';
 import * as mammoth from 'mammoth';
+import { candidatesRepo } from '@/modules/data';
+import { parseResume } from '@/modules/intelligence';
+import { uploadFile } from '@/modules/storage';
+import { normalizePhone } from '@/lib/phone';
+import { normalizeEmail } from '@/lib/email';
+import { toParsedJsonBody } from '@/lib/schemas';
 
 export const runtime = 'nodejs';
 
@@ -31,7 +31,10 @@ export async function POST(request: Request) {
     const file = entry as File;
 
     if (!VALID_TYPES.includes(file.type)) {
-      return NextResponse.json({ error: 'Unsupported file type. Use PDF or DOCX.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Unsupported file type. Use PDF or DOCX.' },
+        { status: 400 }
+      );
     }
 
     if (file.size > 10 * 1024 * 1024) {
@@ -58,7 +61,7 @@ export async function POST(request: Request) {
     try {
       parsedResume = await parseResume(text);
     } catch (error) {
-      console.error('LLM Parse Error:', error);
+      console.error('Resume parse error:', error);
       return NextResponse.json({ error: 'Failed to parse resume using AI' }, { status: 502 });
     }
 
@@ -73,41 +76,30 @@ export async function POST(request: Request) {
     const email = normalizeEmail(parsedResume.email);
     const parsedBody = toParsedJsonBody(parsedResume);
 
-    let existing = await query<{ id: string }>(
-      'SELECT id FROM candidates WHERE phone = $1 AND deleted_at IS NULL',
-      [validPhone]
-    );
-
-    if (existing.rows.length === 0 && email) {
-      existing = await query<{ id: string }>(
-        'SELECT id FROM candidates WHERE LOWER(email) = $1 AND deleted_at IS NULL',
-        [email]
-      );
+    let candidateId = await candidatesRepo.findActiveIdByPhone(validPhone);
+    if (!candidateId && email) {
+      candidateId = await candidatesRepo.findActiveIdByEmail(email);
     }
 
-    let candidateId: string;
-
-    if (existing.rows.length > 0) {
-      candidateId = existing.rows[0].id;
-    } else {
-      const inserted = await query<{ id: string }>(
-        `INSERT INTO candidates (name, email, phone, parsed_json, status, updated_at)
-         VALUES ($1, $2, $3, $4, 'new', NOW())
-         RETURNING id`,
-        [parsedResume.name, email, validPhone, parsedBody]
-      );
-      candidateId = inserted.rows[0].id;
+    if (!candidateId) {
+      candidateId = await candidatesRepo.createCandidate({
+        name: parsedResume.name,
+        email,
+        phone: validPhone,
+        parsedJson: parsedBody,
+      });
     }
 
     const resumeKey = `resumes/${candidateId}/${randomUUID()}-${sanitizeFilename(file.name)}`;
     await uploadFile(buffer, resumeKey, file.type);
 
-    await query(
-      `UPDATE candidates
-       SET name = $1, email = $2, phone = $3, parsed_json = $4, resume_url = $5, updated_at = NOW()
-       WHERE id = $6`,
-      [parsedResume.name, email, validPhone, parsedBody, resumeKey, candidateId]
-    );
+    await candidatesRepo.applyResumeToCandidate(candidateId, {
+      name: parsedResume.name,
+      email,
+      phone: validPhone,
+      parsedJson: parsedBody,
+      resumeKey,
+    });
 
     return NextResponse.json({
       id: candidateId,

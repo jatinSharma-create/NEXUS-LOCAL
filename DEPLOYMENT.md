@@ -1,5 +1,8 @@
 # Nexus — AWS Lightsail deployment (~$10/month)
 
+**Start with [GO_LIVE.md](./GO_LIVE.md)** if you want the short "what to run and
+how to share the link" answer. This file is the click-by-click Lightsail runbook.
+
 Deploy Nexus so recruiters open a **URL in their browser** — no Docker on their machines.
 
 | | |
@@ -67,7 +70,8 @@ One **Lightsail $10/mo** VM runs the same Docker stack as local dev:
 
 ```text
 Recruiter → https://54-123-45-67.sslip.io → Caddy → Next.js app
-Telnyx webhooks → same URL /api/webhooks/telnyx
+Telnyx webhooks → same URL /api/webhooks/voice/telnyx
+                  (the older /api/webhooks/telnyx path still works)
 
 On the VM:  app + worker + Postgres + Redis + MinIO (all in Docker)
 ```
@@ -143,10 +147,11 @@ sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f app
 Telnyx Mission Control → Call Control App → Webhook:
 
 ```text
-https://54-123-45-67.sslip.io/api/webhooks/telnyx
+https://54-123-45-67.sslip.io/api/webhooks/voice/telnyx
 ```
 
-(Use **your** sslip.io hostname, not this example.)
+(Use **your** sslip.io hostname, not this example. The older
+`/api/webhooks/telnyx` path still works.)
 
 ### Step 6 — Test (~15 min)
 

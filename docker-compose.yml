@@ -26,24 +26,34 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
       - MINIO_BUCKET=${MINIO_BUCKET}
-      - TELNYX_API_KEY=${TELNYX_API_KEY}
-      - TELNYX_PUBLIC_KEY=${TELNYX_PUBLIC_KEY}
-      - TELNYX_CALL_CONTROL_APP_ID=${TELNYX_CALL_CONTROL_APP_ID}
-      - TELNYX_TELEPHONY_CREDENTIAL_ID=${TELNYX_TELEPHONY_CREDENTIAL_ID}
-      - TELNYX_CALLER_ID=${TELNYX_CALLER_ID}
-      - TELNYX_SIP_URI=${TELNYX_SIP_URI}
+      # Provider selection (one line switches the whole calling stack)
+      - VOICE_PROVIDER=${VOICE_PROVIDER:-telnyx}
+      - STORAGE_PROVIDER=${STORAGE_PROVIDER:-s3}
+      - LLM_PROVIDER=${LLM_PROVIDER:-google}
+      - STT_PROVIDER=${STT_PROVIDER:-groq}
+      # Provider-neutral calling config. Leave these blank to keep using the
+      # TELNYX_* values below — the app falls back to them automatically.
+      - VOICE_CALLER_ID=${VOICE_CALLER_ID:-}
+      - VOICE_AGENT_ENDPOINT=${VOICE_AGENT_ENDPOINT:-}
       - PUBLIC_APP_URL=${PUBLIC_APP_URL}
       - NEXUS_COMPANY_NAME=${NEXUS_COMPANY_NAME}
       - IVR_CONSENT_ANNOUNCEMENT=${IVR_CONSENT_ANNOUNCEMENT}
       - CONSENT_GATHER_TIMEOUT_SECS=${CONSENT_GATHER_TIMEOUT_SECS}
       - CONSENT_MAX_RETRIES=${CONSENT_MAX_RETRIES}
       - RECORDING_ENABLED=${RECORDING_ENABLED}
-      - STT_PROVIDER=${STT_PROVIDER}
+      - AMD_ENABLED=${AMD_ENABLED:-false}
+      - AMD_HANGUP_ON_BEEP=${AMD_HANGUP_ON_BEEP:-false}
+      # Telnyx adapter credentials (read only inside modules/voice/providers/telnyx)
+      - TELNYX_API_KEY=${TELNYX_API_KEY}
+      - TELNYX_PUBLIC_KEY=${TELNYX_PUBLIC_KEY}
+      - TELNYX_CALL_CONTROL_APP_ID=${TELNYX_CALL_CONTROL_APP_ID}
+      - TELNYX_TELEPHONY_CREDENTIAL_ID=${TELNYX_TELEPHONY_CREDENTIAL_ID}
+      - TELNYX_CALLER_ID=${TELNYX_CALLER_ID}
+      - TELNYX_SIP_URI=${TELNYX_SIP_URI}
+      - AMD_MODE=${AMD_MODE:-premium_ios_call_screening_detection}
+      # Transcription adapter credentials
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GROQ_STT_MODEL=${GROQ_STT_MODEL}
-      - AMD_ENABLED=${AMD_ENABLED:-false}
-      - AMD_MODE=${AMD_MODE:-premium_ios_call_screening_detection}
-      - AMD_HANGUP_ON_BEEP=${AMD_HANGUP_ON_BEEP:-false}
 
   worker:
     build:
@@ -65,7 +75,12 @@ services:
       - GOOGLE_GENERATIVE_AI_MODEL=${GOOGLE_GENERATIVE_AI_MODEL}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GROQ_STT_MODEL=${GROQ_STT_MODEL}
-      - STT_PROVIDER=${STT_PROVIDER}
+      - STT_PROVIDER=${STT_PROVIDER:-groq}
+      - LLM_PROVIDER=${LLM_PROVIDER:-google}
+      - STORAGE_PROVIDER=${STORAGE_PROVIDER:-s3}
+      - PDF_RENDERER=${PDF_RENDERER:-puppeteer}
+      # The worker resolves recording downloads through the voice module.
+      - VOICE_PROVIDER=${VOICE_PROVIDER:-telnyx}
       - TELNYX_API_KEY=${TELNYX_API_KEY}
       - MINIO_ENDPOINT=storage
       - MINIO_PORT=9000
@@ -127,6 +142,22 @@ services:
       - ./Caddyfile.local:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+    networks:
+      - internal
+
+  # Public HTTPS tunnel so carrier webhooks can reach the local stack.
+  # Opt-in: `docker compose --profile tunnel up -d`. Deployed environments have
+  # a real hostname and skip this. Running it here rather than as a host process
+  # means the tunnel restarts with Docker instead of dying with a terminal.
+  tunnel:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    depends_on:
+      - caddy
+    command: http caddy:80 --url=${NGROK_DOMAIN}
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
     networks:
       - internal
 

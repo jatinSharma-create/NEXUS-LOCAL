@@ -1,43 +1,17 @@
 import Link from 'next/link';
-import { query } from '@/lib/db';
+import { callsRepo } from '@/modules/data';
 import { AppShell } from '@/components/AppShell';
 import {
   callDisplayDate,
   formatDuration,
   getPipelineState,
   pipelineLabel,
-  type CallHistoryItem,
 } from '@/lib/call-helpers';
 
 export const dynamic = 'force-dynamic';
 
-type CallListRow = CallHistoryItem & {
-  candidate_id: string | null;
-  candidate_name: string | null;
-  from_number: string | null;
-  to_number: string | null;
-};
-
-async function getCalls(): Promise<CallListRow[]> {
-  const result = await query<CallListRow>(
-    `SELECT
-       c.id, c.candidate_id, c.direction, c.status,
-       c.created_at, c.started_at, c.ended_at,
-       c.duration_seconds, c.recording_url,
-       c.transcript_text, c.summary_text, c.key_points,
-       c.consent_confirmed, c.transcript_pdf_url,
-       c.from_number, c.to_number,
-       cand.name AS candidate_name
-     FROM calls c
-     LEFT JOIN candidates cand ON cand.id = c.candidate_id AND cand.deleted_at IS NULL
-     ORDER BY COALESCE(c.started_at, c.created_at) DESC
-     LIMIT 200`
-  );
-  return result.rows;
-}
-
 export default async function CallsPage() {
-  const calls = await getCalls();
+  const calls = await callsRepo.listRecentCalls();
 
   return (
     <AppShell
@@ -92,7 +66,11 @@ export default async function CallsPage() {
                       </td>
                       <td className="whitespace-nowrap">{formatDuration(call.duration_seconds)}</td>
                       <td className="whitespace-nowrap text-muted">
-                        {call.consent_confirmed ? 'Recorded' : 'No recording'}
+                        {call.consent_confirmed
+                          ? 'Recorded'
+                          : call.consent_method === 'dtmf_2_no_recording'
+                            ? 'Declined recording'
+                            : 'No recording'}
                       </td>
                       <td className="whitespace-nowrap">
                         {state === 'failed_needs_review' ? (

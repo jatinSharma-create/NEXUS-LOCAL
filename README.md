@@ -76,13 +76,19 @@ The `.env` must contain values for:
 | `APP_PASSWORD` | Logging into Nexus | You choose it |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Resume parsing, call summaries | https://aistudio.google.com/apikey |
 | `GROQ_API_KEY` | Call transcription | https://console.groq.com/keys |
+| `VOICE_CALLER_ID` | The number calls come from | Your Telnyx phone number |
+| `VOICE_AGENT_ENDPOINT` | Connecting your browser to the call | Your Telnyx SIP credential |
 | `TELNYX_API_KEY` | Calling | Telnyx Mission Control |
 | `TELNYX_PUBLIC_KEY` | Verifying call webhooks | Telnyx Mission Control |
 | `TELNYX_CALL_CONTROL_APP_ID` | Calling | Telnyx Mission Control |
 | `TELNYX_TELEPHONY_CREDENTIAL_ID` | Browser calling (WebRTC) | Telnyx Mission Control |
-| `TELNYX_CALLER_ID` | The number calls come from | Telnyx phone number |
-| `TELNYX_SIP_URI` | Connecting your browser to the call | Telnyx SIP credential |
 | `MINIO_*`, `DATABASE_URL`, `REDIS_URL` | Internal storage/database | Leave at defaults |
+
+The last four are only read by the Telnyx adapter. Telephony, transcription,
+summarisation, PDF rendering and storage are each swappable modules — see
+**[ARCHITECTURE.md](./ARCHITECTURE.md)**. Existing `.env` files keep working:
+`TELNYX_CALLER_ID` and `TELNYX_SIP_URI` are still honoured when the neutral
+names are blank.
 
 **Sharing API keys means they use your quota/billing.** If you would rather not share, tell them to create their own free Gemini and Groq keys and paste those in instead — everything except calling works with just a Gemini key.
 
@@ -488,7 +494,25 @@ Nexus now lives at **http://localhost:8080** (and http://localhost:3001 for dire
 4. Change status / add notes
 5. Use the search bar to filter candidates
 
-Live phone calling needs extra Telnyx + tunnel setup. Ask a teammate before trying calls.
+### Live phone calling
+
+Calling needs a public HTTPS address, because the phone provider has to reach
+your computer to play the consent message. Without it the candidate answers to
+silence. With `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` set in `.env`:
+
+```bash
+docker compose --profile tunnel up -d
+```
+
+Then check it is ready:
+
+```bash
+curl -s http://localhost:8080/api/health/calling
+```
+
+`"ready": true` means calling is good to go. If `publicReachable` is `false`,
+the tunnel is down — that is the usual cause. In the Telnyx console, point the
+webhook at `https://<your-domain>/api/webhooks/voice/telnyx`.
 
 ---
 

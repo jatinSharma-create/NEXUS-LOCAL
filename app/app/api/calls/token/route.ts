@@ -1,26 +1,26 @@
 import { NextResponse } from 'next/server';
-import { generateWebrtcToken } from '@/lib/telnyx';
+import { createClientCredentials, getCallerId } from '@/modules/voice';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Credentials for the recruiter's browser leg.
+ *
+ * The response names the provider so the browser can load the matching client
+ * adapter — the UI never needs its own copy of the calling configuration.
+ */
 export async function POST() {
   try {
-    const telephonyCredentialId = process.env.TELNYX_TELEPHONY_CREDENTIAL_ID;
-    if (!telephonyCredentialId) {
-      return NextResponse.json(
-        { error: 'TELNYX_TELEPHONY_CREDENTIAL_ID not configured' },
-        { status: 500 }
-      );
-    }
+    const credentials = await createClientCredentials();
 
-    const token = await generateWebrtcToken(telephonyCredentialId);
     return NextResponse.json({
-      token,
-      callerId: process.env.TELNYX_CALLER_ID,
-      sipUri: process.env.TELNYX_SIP_URI,
+      ...credentials,
+      callerId: getCallerId() || null,
     });
   } catch (error) {
-    console.error('Error generating token:', error);
-    return NextResponse.json({ error: 'Failed to generate token' }, { status: 500 });
+    console.error('Error generating calling credentials:', error);
+    const message =
+      error instanceof Error ? error.message : 'Failed to generate calling credentials';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

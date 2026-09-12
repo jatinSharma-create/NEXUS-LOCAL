@@ -1,5 +1,5 @@
-import { query } from '@/lib/db';
-import { getPresignedUrl } from '@/lib/storage';
+import { callsRepo, candidatesRepo } from '@/modules/data';
+import { getPresignedUrl } from '@/modules/storage';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { AppShell } from '@/components/AppShell';
@@ -14,19 +14,14 @@ import {
   formatDuration,
   getPipelineState,
   pipelineLabel,
-  type CallHistoryItem,
 } from '@/lib/call-helpers';
 
 export const dynamic = 'force-dynamic';
 
 async function getCandidate(id: string): Promise<CandidateRecord | null> {
-  const result = await query<CandidateRecord>(
-    'SELECT * FROM candidates WHERE id = $1 AND deleted_at IS NULL',
-    [id]
-  );
-  if (result.rows.length === 0) return null;
+  const candidate = await candidatesRepo.getCandidateById(id);
+  if (!candidate) return null;
 
-  const candidate = result.rows[0];
   let resume_download_url: string | null = null;
 
   if (candidate.resume_url) {
@@ -48,21 +43,6 @@ const emptyParsedJson: ParsedJsonBody = {
   education: [],
 };
 
-async function getCandidateCalls(id: string): Promise<CallHistoryItem[]> {
-  const result = await query<CallHistoryItem>(
-    `SELECT id, direction, status,
-            created_at, started_at, ended_at,
-            duration_seconds, recording_url,
-            transcript_text, summary_text, key_points,
-            consent_confirmed, transcript_pdf_url
-     FROM calls
-     WHERE candidate_id = $1
-     ORDER BY COALESCE(started_at, created_at) DESC`,
-    [id]
-  );
-  return result.rows;
-}
-
 export default async function CandidateProfile({ params }: { params: { id: string } }) {
   const candidate = await getCandidate(params.id);
 
@@ -70,7 +50,7 @@ export default async function CandidateProfile({ params }: { params: { id: strin
     notFound();
   }
 
-  const calls = await getCandidateCalls(candidate.id);
+  const calls = await callsRepo.listCallsForCandidate(candidate.id);
   const parsedJson = candidate.parsed_json ?? emptyParsedJson;
 
   return (

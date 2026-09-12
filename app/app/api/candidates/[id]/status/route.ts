@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PIPELINE_STAGES } from '@/lib/types';
-import { updateCandidateStatus } from '@/lib/candidates';
+import { candidatesRepo } from '@/modules/data';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +18,10 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       );
     }
 
-    const updated = await updateCandidateStatus(params.id, status as (typeof PIPELINE_STAGES)[number]);
+    const updated = await candidatesRepo.updateCandidateStatus(
+      params.id,
+      status as (typeof PIPELINE_STAGES)[number]
+    );
 
     if (!updated) {
       return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });

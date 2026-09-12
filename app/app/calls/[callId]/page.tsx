@@ -1,5 +1,5 @@
-import { query } from '@/lib/db';
-import { getPresignedUrl } from '@/lib/storage';
+import { callsRepo, candidatesRepo } from '@/modules/data';
+import { getPresignedUrl } from '@/modules/storage';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { AppShell } from '@/components/AppShell';
@@ -8,22 +8,9 @@ import {
   formatDuration,
   getPipelineState,
   pipelineLabel,
-  type CallHistoryItem,
 } from '@/lib/call-helpers';
 
 export const dynamic = 'force-dynamic';
-
-type CallDetail = CallHistoryItem & {
-  candidate_id: string | null;
-  from_number: string | null;
-  to_number: string | null;
-};
-
-type CandidateBasic = {
-  id: string;
-  name: string;
-  phone: string;
-};
 
 type ParsedKeyPoints = {
   key_points?: string[];
@@ -31,34 +18,13 @@ type ParsedKeyPoints = {
   sentiment?: string;
 };
 
-async function getCallDetail(callId: string): Promise<CallDetail | null> {
-  const result = await query<CallDetail>(
-    `SELECT id, candidate_id, direction, status,
-            created_at, started_at, ended_at,
-            duration_seconds, recording_url,
-            transcript_text, summary_text, key_points,
-            consent_confirmed, transcript_pdf_url,
-            from_number, to_number
-     FROM calls
-     WHERE id = $1`,
-    [callId]
-  );
-  return result.rows[0] ?? null;
-}
-
-async function getCandidate(id: string): Promise<CandidateBasic | null> {
-  const result = await query<CandidateBasic>(
-    'SELECT id, name, phone FROM candidates WHERE id = $1 AND deleted_at IS NULL',
-    [id]
-  );
-  return result.rows[0] ?? null;
-}
-
 export default async function CallDetailPage({ params }: { params: { callId: string } }) {
-  const call = await getCallDetail(params.callId);
+  const call = await callsRepo.findCallDetail(params.callId);
   if (!call) notFound();
 
-  const candidate = call.candidate_id ? await getCandidate(call.candidate_id) : null;
+  const candidate = call.candidate_id
+    ? await candidatesRepo.getCandidateById(call.candidate_id)
+    : null;
   const state = getPipelineState(call);
   const displayDate = callDisplayDate(call);
   const number = call.direction === 'inbound' ? call.from_number : call.to_number;
@@ -238,7 +204,9 @@ export default async function CallDetailPage({ params }: { params: { callId: str
 
         {state === 'no_recording' && (
           <div className="nexus-panel p-6 text-center text-muted text-sm">
-            This call completed without recording consent.
+            {call.consent_method === 'dtmf_2_no_recording'
+              ? 'The candidate pressed 2 and continued without recording. No transcript or PDF is generated unless they press 1.'
+              : 'This call completed without recording consent.'}
           </div>
         )}
       </div>

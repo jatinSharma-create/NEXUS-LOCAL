@@ -1,31 +1,33 @@
 import { NextResponse } from 'next/server';
+import { getCallingConfigReport, getVoiceProviderName, getWebhookUrl } from '@/modules/voice';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Lightweight calling readiness check for local setup.
+ * Calling readiness for local setup.
  * GET /api/health/calling
+ *
+ * The provider reports its own requirements, so this endpoint tells the truth
+ * about whichever vendor is active rather than a hardcoded checklist.
  */
 export async function GET() {
-  const publicAppUrl = (process.env.PUBLIC_APP_URL || '').trim().replace(/\/$/, '');
-  const webhookUrl = publicAppUrl ? `${publicAppUrl}/api/webhooks/telnyx` : null;
+  const providerName = getVoiceProviderName();
 
-  const required = {
-    TELNYX_API_KEY: Boolean(process.env.TELNYX_API_KEY),
-    TELNYX_CALL_CONTROL_APP_ID: Boolean(process.env.TELNYX_CALL_CONTROL_APP_ID),
-    TELNYX_TELEPHONY_CREDENTIAL_ID: Boolean(process.env.TELNYX_TELEPHONY_CREDENTIAL_ID),
-    TELNYX_CALLER_ID: Boolean(
-      process.env.TELNYX_CALLER_ID && !process.env.TELNYX_CALLER_ID.includes('XXXXXXXX')
-    ),
-    TELNYX_SIP_URI: Boolean(
-      process.env.TELNYX_SIP_URI && !process.env.TELNYX_SIP_URI.includes('your_sip_username')
-    ),
-    PUBLIC_APP_URL: Boolean(
-      publicAppUrl && publicAppUrl.startsWith('https://') && !publicAppUrl.includes('xxxx.ngrok')
-    ),
-    TELNYX_PUBLIC_KEY: Boolean(process.env.TELNYX_PUBLIC_KEY),
-    RECORDING_ENABLED: process.env.RECORDING_ENABLED === 'true',
-  };
+  let report: ReturnType<typeof getCallingConfigReport> | null = null;
+  let reportError: string | null = null;
+  try {
+    report = getCallingConfigReport();
+  } catch (err) {
+    reportError = err instanceof Error ? err.message : 'Unknown voice provider';
+  }
+
+  let webhookUrl: string | null = null;
+  let publicAppUrlValid = true;
+  try {
+    webhookUrl = getWebhookUrl(providerName);
+  } catch {
+    publicAppUrlValid = false;
+  }
 
   let publicReachable: boolean | null = null;
   let publicStatus: number | null = null;
@@ -45,24 +47,23 @@ export async function GET() {
     }
   }
 
-  const ready =
-    required.TELNYX_API_KEY &&
-    required.TELNYX_CALL_CONTROL_APP_ID &&
-    required.TELNYX_TELEPHONY_CREDENTIAL_ID &&
-    required.TELNYX_CALLER_ID &&
-    required.TELNYX_SIP_URI &&
-    required.PUBLIC_APP_URL &&
-    publicReachable === true;
-
-  const callerId = process.env.TELNYX_CALLER_ID || null;
+  const ready = Boolean(report?.providerReady) && publicAppUrlValid && publicReachable === true;
 
   return NextResponse.json({
     ready,
-    publicAppUrl: publicAppUrl || null,
+    provider: providerName,
+    error: reportError,
     webhookUrl,
     publicReachable,
     publicStatus,
-    callerId,
-    required,
+    callerId: report?.callerId ?? null,
+    agentEndpointKind: report?.agentEndpointKind ?? null,
+    capabilities: report?.capabilities ?? null,
+    limitations: report?.limitations ?? [],
+    missing: report?.missing ?? [],
+    required: {
+      ...(report?.required ?? {}),
+      PUBLIC_APP_URL: publicAppUrlValid,
+    },
   });
 }

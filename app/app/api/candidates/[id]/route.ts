@@ -1,29 +1,21 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import { getPresignedUrl } from '@/lib/storage';
+import { candidatesRepo } from '@/modules/data';
+import { getPresignedUrl } from '@/modules/storage';
 import { normalizePhone } from '@/lib/phone';
 import { normalizeEmail } from '@/lib/email';
-import type { CandidateListItem } from '@/lib/types';
-import { PIPELINE_STAGES } from '@/lib/types';
+import { PIPELINE_STAGES, type PipelineStage } from '@/lib/types';
+import type { ParsedJsonBody } from '@/lib/schemas';
 
 export const dynamic = 'force-dynamic';
 
-const TRASH_RETENTION_DAYS = 30;
-
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
   try {
-    const result = await query(
-      'SELECT * FROM candidates WHERE id = $1 AND deleted_at IS NULL',
-      [params.id]
-    );
-
-    if (result.rows.length === 0) {
+    const candidate = await candidatesRepo.getCandidateById(params.id);
+    if (!candidate) {
       return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });
     }
 
-    const candidate = result.rows[0];
     let resume_download_url = null;
-
     if (candidate.resume_url) {
       try {
         resume_download_url = await getPresignedUrl(candidate.resume_url);
@@ -44,17 +36,13 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const body = await request.json();
     const { name, email, phone, status, current_role } = body;
 
-    const existing = await query(
-      'SELECT * FROM candidates WHERE id = $1 AND deleted_at IS NULL',
-      [params.id]
-    );
-    if (existing.rows.length === 0) {
+    const current = await candidatesRepo.getCandidateById(params.id);
+    if (!current) {
       return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });
     }
 
-    const current = existing.rows[0];
     let updatedPhone = current.phone;
-    let updatedEmail = current.email as string | null;
+    let updatedEmail = current.email;
 
     if (phone !== undefined) {
       const normalized = normalizePhone(phone);
@@ -80,32 +68,20 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
     }
 
-    const parsedJson = current.parsed_json ?? {};
+    const parsedJson = (current.parsed_json ?? {}) as Partial<ParsedJsonBody>;
     if (current_role !== undefined) {
       parsedJson.current_role = current_role || null;
     }
 
-    const result = await query<CandidateListItem>(
-      `UPDATE candidates
-       SET name = COALESCE($1, name),
-           email = $2,
-           phone = $3,
-           status = COALESCE($4, status),
-           parsed_json = $5,
-           updated_at = NOW()
-       WHERE id = $6 AND deleted_at IS NULL
-       RETURNING id, name, email, phone, status, parsed_json->>'current_role' as current_role, created_at`,
-      [
-        name ?? null,
-        updatedEmail,
-        updatedPhone,
-        status ?? null,
-        parsedJson,
-        params.id,
-      ]
-    );
+    const updated = await candidatesRepo.updateCandidateProfile(params.id, {
+      name: name ?? null,
+      email: updatedEmail,
+      phone: updatedPhone,
+      status: (status as PipelineStage) ?? null,
+      parsedJson,
+    });
 
-    return NextResponse.json(result.rows[0]);
+    return NextResponse.json(updated);
   } catch (error) {
     console.error('Error updating candidate:', error);
     const pgError = error as { code?: string };
@@ -121,19 +97,11 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
 export async function DELETE(_request: Request, { params }: { params: { id: string } }) {
   try {
-    const result = await query(
-      `UPDATE candidates
-       SET deleted_at = NOW(), updated_at = NOW()
-       WHERE id = $1 AND deleted_at IS NULL
-       RETURNING id`,
-      [params.id]
-    );
-
-    if (result.rows.length === 0) {
+    const deletedId = await candidatesRepo.softDeleteCandidate(params.id);
+    if (!deletedId) {
       return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });
     }
-
-    return NextResponse.json({ success: true, id: result.rows[0].id });
+    return NextResponse.json({ success: true, id: deletedId });
   } catch (error) {
     console.error('Error soft-deleting candidate:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
@@ -147,24 +115,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
     }
 
-    const result = await query(
-      `UPDATE candidates
-       SET deleted_at = NULL, updated_at = NOW()
-       WHERE id = $1
-         AND deleted_at IS NOT NULL
-         AND deleted_at > NOW() - ($2::INT * INTERVAL '1 day')
-       RETURNING id, name`,
-      [params.id, TRASH_RETENTION_DAYS]
-    );
-
-    if (result.rows.length === 0) {
+    const restored = await candidatesRepo.restoreCandidate(params.id);
+    if (!restored) {
       return NextResponse.json(
         { error: 'Candidate not found in Trash or recovery window expired' },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ success: true, id: result.rows[0].id, name: result.rows[0].name });
+    return NextResponse.json({ success: true, id: restored.id, name: restored.name });
   } catch (error) {
     console.error('Error restoring candidate:', error);
     const pgError = error as { code?: string };

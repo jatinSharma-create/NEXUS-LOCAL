@@ -1,40 +1,12 @@
-import { query } from '@/lib/db';
+import { candidatesRepo, TRASH_RETENTION_DAYS } from '@/modules/data';
 import { AppShell } from '@/components/AppShell';
 import { RestoreCandidateButton } from '@/components/RestoreCandidateButton';
-import type { TrashCandidateItem } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-const TRASH_RETENTION_DAYS = 30;
-
-async function purgeExpired() {
-  await query(
-    `DELETE FROM candidates
-     WHERE deleted_at IS NOT NULL
-       AND deleted_at < NOW() - ($1::INT * INTERVAL '1 day')`,
-    [TRASH_RETENTION_DAYS]
-  );
-}
-
-async function getTrash(): Promise<(TrashCandidateItem & { days_left: number })[]> {
-  const result = await query<TrashCandidateItem & { days_left: number }>(
-    `SELECT id, name, email, phone, deleted_at,
-            GREATEST(
-              0,
-              CEIL(EXTRACT(EPOCH FROM (deleted_at + ($1::INT * INTERVAL '1 day') - NOW())) / 86400.0)
-            )::INT AS days_left
-     FROM candidates
-     WHERE deleted_at IS NOT NULL
-       AND deleted_at > NOW() - ($1::INT * INTERVAL '1 day')
-     ORDER BY deleted_at DESC`,
-    [TRASH_RETENTION_DAYS]
-  );
-  return result.rows;
-}
-
 export default async function TrashPage() {
-  await purgeExpired();
-  const items = await getTrash();
+  await candidatesRepo.purgeExpiredCandidates();
+  const items = await candidatesRepo.listTrash();
 
   return (
     <AppShell title="Trash">

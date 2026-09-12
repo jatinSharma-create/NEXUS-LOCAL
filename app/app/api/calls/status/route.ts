@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { callsRepo } from '@/modules/data';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Lightweight call status for the dialer UI (poll while ringing / consent).
+ * Lightweight call status for the dialer UI (polled while ringing / awaiting consent).
  * GET /api/calls/status?callId=...
  */
 export async function GET(request: Request) {
@@ -13,20 +13,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'callId is required' }, { status: 400 });
   }
 
-  const result = await query<{
-    id: string;
-    status: string | null;
-    hangup_cause: string | null;
-    consent_method: string | null;
-    to_number: string | null;
-    from_number: string | null;
-  }>(
-    `SELECT id, status, hangup_cause, consent_method, to_number, from_number
-     FROM calls WHERE id = $1`,
-    [callId]
-  );
-
-  const call = result.rows[0];
+  const call = await callsRepo.findCallStatus(callId);
   if (!call) {
     return NextResponse.json({ error: 'Call not found' }, { status: 404 });
   }
@@ -50,9 +37,10 @@ export async function GET(request: Request) {
   } else if (call.status === 'completed') {
     userMessage = null;
   } else if (call.status === 'awaiting_consent') {
-    userMessage = 'Ringing…';
+    userMessage =
+      'Candidate answered. Waiting for them to press 1 (record) or 2 (no recording). Your line rings after that — stay on.';
   } else if (call.status === 'ringing' || call.status === 'initiating') {
-    userMessage = 'Calling…';
+    userMessage = 'Calling the candidate…';
   }
 
   return NextResponse.json({

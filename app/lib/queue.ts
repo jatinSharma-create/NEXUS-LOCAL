@@ -13,7 +13,10 @@ export interface CallProcessingJobData {
   callId?: string;
   recordingUrl: string;
   candidateId?: string | null;
-  telnyxRecordingId?: string | null;
+  /** Provider-side recording identifier, resolved back through the voice module. */
+  providerRecordingId?: string | null;
+  /** Which provider recorded it — a later default change must not break replays. */
+  provider?: string | null;
 }
 
 const defaultJobOptions = {

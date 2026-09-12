@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start ngrok → local Caddy (:80) and print the webhook URL to paste into Telnyx / .env
+# Start ngrok → local Caddy and print the webhook URL to paste into your carrier / .env
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -9,17 +9,39 @@ if ! command -v ngrok >/dev/null; then
   exit 1
 fi
 
-if ! curl -sf http://127.0.0.1:80/login >/dev/null 2>&1; then
-  echo "Local stack does not look up on :80. Run: docker compose up -d"
+# Caddy's published host port is configurable (HTTP_PORT in .env), so read it
+# rather than assuming :80 — publishing 80 fails on a Mac that already uses it.
+HTTP_PORT=8080
+if [[ -f .env ]]; then
+  ENV_PORT=$(sed -n 's/^HTTP_PORT=//p' .env | tail -1 | tr -d '[:space:]')
+  [[ -n "${ENV_PORT:-}" ]] && HTTP_PORT="$ENV_PORT"
+fi
+
+if ! curl -sf "http://127.0.0.1:${HTTP_PORT}/login" >/dev/null 2>&1; then
+  echo "Local stack does not look up on :${HTTP_PORT}. Run: docker compose up -d"
   exit 1
 fi
 
-# Kill prior tunnel from this helper if any
-pkill -f 'ngrok http 80' 2>/dev/null || true
+# Reuse the reserved domain already in .env when there is one. A random URL
+# would mean re-entering the webhook address in the carrier console every time.
+RESERVED=""
+if [[ -f .env ]]; then
+  RESERVED=$(sed -n 's|^PUBLIC_APP_URL=https://||p' .env | tail -1 | tr -d '[:space:]')
+fi
+
+pkill -f 'ngrok http' 2>/dev/null || true
 sleep 1
 
-ngrok http 127.0.0.1:80 --log=stdout >/tmp/ngrok-nexus.log 2>&1 &
-echo "Starting ngrok…"
+# nohup + disown so the tunnel outlives this script. Without it ngrok dies with
+# the launching shell and the reserved domain starts serving ngrok's own 404,
+# which looks exactly like the app being down.
+if [[ -n "$RESERVED" ]]; then
+  nohup ngrok http "127.0.0.1:${HTTP_PORT}" --url="$RESERVED" --log=stdout >/tmp/ngrok-nexus.log 2>&1 &
+else
+  nohup ngrok http "127.0.0.1:${HTTP_PORT}" --log=stdout >/tmp/ngrok-nexus.log 2>&1 &
+fi
+disown
+echo "Starting ngrok → 127.0.0.1:${HTTP_PORT}…"
 
 URL=""
 for i in $(seq 1 20); do
@@ -47,11 +69,17 @@ if [[ -f .env ]]; then
   fi
 fi
 
+VOICE_PROVIDER=telnyx
+if [[ -f .env ]]; then
+  ENV_PROVIDER=$(sed -n 's/^VOICE_PROVIDER=//p' .env | tail -1 | tr -d '[:space:]')
+  [[ -n "${ENV_PROVIDER:-}" ]] && VOICE_PROVIDER="$ENV_PROVIDER"
+fi
+
 echo ""
 echo "Tunnel:     $URL"
-echo "Webhook:    $URL/api/webhooks/telnyx"
+echo "Webhook:    $URL/api/webhooks/voice/${VOICE_PROVIDER}"
 echo ""
 echo "Reload app env:  docker compose up -d app worker"
-echo "Health check:    curl -s http://localhost/api/health/calling | python3 -m json.tool"
+echo "Health check:    curl -s http://127.0.0.1:${HTTP_PORT}/api/health/calling | python3 -m json.tool"
 echo ""
-echo "Keep this terminal's ngrok process running while you place calls."
+echo "Keep ngrok running while you place calls."
