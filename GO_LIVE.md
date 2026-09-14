@@ -1,7 +1,8 @@
 # Go live — share Nexus so someone else can call
 
-Read this file first. `DEPLOYMENT.md` is the click-by-click Lightsail runbook.
+**Tonight, follow [DEPLOY_PRODUCTION.md](./DEPLOY_PRODUCTION.md)** (on branch `deploy`).
 This file is the decision: **what to run, why, and how sharing actually works.**
+`DEPLOYMENT.md` is extra Lightsail clicks.
 
 ---
 

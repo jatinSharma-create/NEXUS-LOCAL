@@ -1,7 +1,7 @@
 # Nexus — AWS Lightsail deployment (~$10/month)
 
-**Start with [GO_LIVE.md](./GO_LIVE.md)** if you want the short "what to run and
-how to share the link" answer. This file is the click-by-click Lightsail runbook.
+**Start with [DEPLOY_PRODUCTION.md](./DEPLOY_PRODUCTION.md)** on the `deploy`
+branch. This file is extra Lightsail console detail.
 
 Deploy Nexus so recruiters open a **URL in their browser** — no Docker on their machines.
 

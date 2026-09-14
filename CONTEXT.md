@@ -21,12 +21,12 @@ Keep entries short: what the file is for, not a diff.
 
 ## Current state
 
-- **Branch:** `develop` (local checkout). `origin/develop` and `origin/deploy`
-  both point at `fa4ebd4`.
-- **Status:** modular stack is committed and pushed. Go live with `GO_LIVE.md`.
-  Share a public HTTPS URL + `APP_PASSWORD`; do not share `.env`.
-- **Most recent work:** vendor-neutral modules, recruiter-leg consent fix,
-  honest dialer copy during IVR, Lightsail go-live guide.
+- **Branch:** `deploy` (this checkout). `origin/deploy` is the branch the
+  server clones. Keep `develop` in sync after this commit.
+- **Status:** production compose binds 80/443, hides MinIO, no ngrok. Follow
+  `DEPLOY_PRODUCTION.md` to go live.
+- **Most recent work:** deploy-branch production overlay + verify script +
+  production runbook for this modular release.
 
 ---
 
@@ -193,7 +193,8 @@ in `core/` are explanatory comments only.
 | `app/app/api/webhooks/voice/[provider]/route.ts` | Canonical webhook path for every provider. |
 | `db/migrate-provider-agnostic-voice.sql` | Renames the `telnyx_*` columns, backfills `provider`, creates `call_sessions`, drops `client_state`. Transactional and idempotent. |
 | `ARCHITECTURE.md` | Design rationale and the four steps to add a provider. |
-| `GO_LIVE.md` | The short answer: deploy one Lightsail box, share the HTTPS URL + password. |
+| `GO_LIVE.md` | Why Lightsail + how sharing works. Points at `DEPLOY_PRODUCTION.md` for the actual steps. |
+| `DEPLOY_PRODUCTION.md` | The production runbook for this release on the `deploy` branch. |
 | `CONTEXT.md` | This file. |
 
 ---
@@ -227,9 +228,11 @@ in `core/` are explanatory comments only.
 | `db/init.sql` | Provider-neutral call columns; added the `call_sessions` table. |
 | `docker-compose.yml` | Added provider-selection and neutral calling env vars; grouped vendor credentials separately. Added the opt-in `tunnel` service (ngrok → `caddy:80`, `--profile tunnel`) so the public URL webhooks need is managed by Docker rather than a terminal session. |
 | `scripts/start-tunnel.sh` | Host-ngrok alternative to the `tunnel` container. Reads `HTTP_PORT` from `.env` instead of assuming `:80`, reuses the reserved domain already in `PUBLIC_APP_URL` so the webhook address survives restarts, detaches with `nohup`/`disown`, and prints the canonical `/api/webhooks/voice/<provider>` path. |
+| `scripts/verify-deploy.sh` | Confirms you are on `deploy`, production compose parses, and tsc/lint pass. |
 | `.env.example` | Rewritten around provider selection with vendor credentials in their own section. Documents `NGROK_AUTHTOKEN` / `NGROK_DOMAIN` for the tunnel container. |
 | `README.md` | Env table updated to the neutral names; links to `ARCHITECTURE.md`. The "live phone calling" placeholder is now the actual tunnel + health-check procedure. |
-| `DEPLOYMENT.md` | Lightsail runbook. Points at `GO_LIVE.md`; webhook URL is `/api/webhooks/voice/telnyx`. |
+| `DEPLOYMENT.md` | Lightsail click-by-click. Points at `GO_LIVE.md` / `DEPLOY_PRODUCTION.md`. |
+| `docker-compose.prod.yml` | Production overlay: HTTPS 80/443, no public MinIO, no public app port, no ngrok. |
 | `.env.production.example` | Server env template with provider-selection vars and sslip.io hostnames. |
 
 ---

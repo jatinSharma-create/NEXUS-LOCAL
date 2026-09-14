@@ -1,8 +1,18 @@
 # Production overrides for AWS Lightsail (or any single VPS).
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Do NOT use --profile tunnel here. Production has a real hostname; ngrok is
+# only for a laptop. Do NOT copy a local .env that sets HTTP_PORT=8080 —
+# Caddy must own 80 and 443 for Let's Encrypt.
 
 services:
   app:
+    environment:
+      - NODE_ENV=production
+    # App is reached through Caddy, not a public host port.
+    ports: []
+
+  worker:
     environment:
       - NODE_ENV=production
 
@@ -11,6 +21,9 @@ services:
       - DOMAIN=${DOMAIN}
       - FILES_DOMAIN=${FILES_DOMAIN}
       - ACME_EMAIL=${ACME_EMAIL:-admin@${DOMAIN}}
+    ports:
+      - "80:80"
+      - "443:443"
     volumes:
       - ./Caddyfile.production:/etc/caddy/Caddyfile
       - caddy_data:/data
