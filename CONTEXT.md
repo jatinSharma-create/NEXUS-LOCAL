@@ -21,12 +21,10 @@ Keep entries short: what the file is for, not a diff.
 
 ## Current state
 
-- **Branch:** `deploy` (this checkout). `origin/deploy` is the branch the
-  server clones. Keep `develop` in sync after this commit.
-- **Status:** production compose binds 80/443, hides MinIO, no ngrok. Follow
-  `DEPLOY_PRODUCTION.md` to go live.
-- **Most recent work:** deploy-branch production overlay + verify script +
-  production runbook for this modular release.
+- **Branch:** `deploy`
+- **Status:** one production guide — `DEPLOYMENT.md`. Duplicate go-live docs removed.
+- **Most recent work:** collapsed `GO_LIVE.md` and `DEPLOY_PRODUCTION.md` into
+  `DEPLOYMENT.md` so there is a single set of deploy instructions.
 
 ---
 
@@ -193,8 +191,6 @@ in `core/` are explanatory comments only.
 | `app/app/api/webhooks/voice/[provider]/route.ts` | Canonical webhook path for every provider. |
 | `db/migrate-provider-agnostic-voice.sql` | Renames the `telnyx_*` columns, backfills `provider`, creates `call_sessions`, drops `client_state`. Transactional and idempotent. |
 | `ARCHITECTURE.md` | Design rationale and the four steps to add a provider. |
-| `GO_LIVE.md` | Why Lightsail + how sharing works. Points at `DEPLOY_PRODUCTION.md` for the actual steps. |
-| `DEPLOY_PRODUCTION.md` | The production runbook for this release on the `deploy` branch. |
 | `CONTEXT.md` | This file. |
 
 ---
@@ -231,7 +227,7 @@ in `core/` are explanatory comments only.
 | `scripts/verify-deploy.sh` | Confirms you are on `deploy`, production compose parses, and tsc/lint pass. |
 | `.env.example` | Rewritten around provider selection with vendor credentials in their own section. Documents `NGROK_AUTHTOKEN` / `NGROK_DOMAIN` for the tunnel container. |
 | `README.md` | Env table updated to the neutral names; links to `ARCHITECTURE.md`. The "live phone calling" placeholder is now the actual tunnel + health-check procedure. |
-| `DEPLOYMENT.md` | Lightsail click-by-click. Points at `GO_LIVE.md` / `DEPLOY_PRODUCTION.md`. |
+| `DEPLOYMENT.md` | The only production guide: Lightsail, sslip.io, `.env`, Telnyx webhook, sharing, updates. |
 | `docker-compose.prod.yml` | Production overlay: HTTPS 80/443, no public MinIO, no public app port, no ngrok. |
 | `.env.production.example` | Server env template with provider-selection vars and sslip.io hostnames. |
 
@@ -251,6 +247,8 @@ in `core/` are explanatory comments only.
 | `app/lib/pdf.ts` | `modules/documents/` |
 | `app/lib/stt/` | `modules/transcription/` |
 | `db/migrate-call-control-index.sql` | `db/migrate-provider-agnostic-voice.sql` |
+| `GO_LIVE.md` | `DEPLOYMENT.md` |
+| `DEPLOY_PRODUCTION.md` | `DEPLOYMENT.md` |
 
 ---
 
