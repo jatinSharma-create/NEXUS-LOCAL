@@ -22,9 +22,10 @@ Keep entries short: what the file is for, not a diff.
 ## Current state
 
 - **Branch:** `deploy`
-- **Status:** one production guide — `DEPLOYMENT.md`. Duplicate go-live docs removed.
-- **Most recent work:** collapsed `GO_LIVE.md` and `DEPLOY_PRODUCTION.md` into
-  `DEPLOYMENT.md` so there is a single set of deploy instructions.
+- **Status:** one production guide — `DEPLOYMENT.md`. Host is **Hetzner CX23**
+  (~A$10/mo, 4 GB x86 + IPv4), not AWS/GCP.
+- **Most recent work:** switched production from Lightsail to Hetzner so a 4 GB
+  VM fits the A$10 cap. AWS/GCP 2 GB IPv4 boxes are ~A$18.
 
 ---
 
@@ -225,9 +226,14 @@ in `core/` are explanatory comments only.
 | `docker-compose.yml` | Added provider-selection and neutral calling env vars; grouped vendor credentials separately. Added the opt-in `tunnel` service (ngrok → `caddy:80`, `--profile tunnel`) so the public URL webhooks need is managed by Docker rather than a terminal session. |
 | `scripts/start-tunnel.sh` | Host-ngrok alternative to the `tunnel` container. Reads `HTTP_PORT` from `.env` instead of assuming `:80`, reuses the reserved domain already in `PUBLIC_APP_URL` so the webhook address survives restarts, detaches with `nohup`/`disown`, and prints the canonical `/api/webhooks/voice/<provider>` path. |
 | `scripts/verify-deploy.sh` | Confirms you are on `deploy`, production compose parses, and tsc/lint pass. |
+| `scripts/sslip-hostnames.sh` | Prints sslip.io hostnames and the Telnyx webhook from a VPS IPv4. |
+| `scripts/hetzner-bootstrap.sh` | Fresh Ubuntu CX23: install Docker, clone `deploy`, copy `.env` template. |
+| `scripts/deploy-update.sh` | On the server: pull `deploy` and rebuild production compose. |
+| `scripts/aws-lightsail-bootstrap.sh` | Compatibility wrapper → `hetzner-bootstrap.sh`. |
+| `scripts/aws-deploy-update.sh` | Compatibility wrapper → `deploy-update.sh`. |
 | `.env.example` | Rewritten around provider selection with vendor credentials in their own section. Documents `NGROK_AUTHTOKEN` / `NGROK_DOMAIN` for the tunnel container. |
 | `README.md` | Env table updated to the neutral names; links to `ARCHITECTURE.md`. The "live phone calling" placeholder is now the actual tunnel + health-check procedure. |
-| `DEPLOYMENT.md` | The only production guide: Lightsail, sslip.io, `.env`, Telnyx webhook, sharing, updates. |
+| `DEPLOYMENT.md` | The only production guide: Hetzner CX23, sslip.io, `.env`, Telnyx webhook, sharing, updates. |
 | `docker-compose.prod.yml` | Production overlay: HTTPS 80/443, no public MinIO, no public app port, no ngrok. |
 | `.env.production.example` | Server env template with provider-selection vars and sslip.io hostnames. |
 

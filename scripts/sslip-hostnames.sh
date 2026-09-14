@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Print free sslip.io hostnames for a Lightsail static IP (no domain purchase needed).
-# Usage: ./scripts/sslip-hostnames.sh 54.123.45.67
+# Print free sslip.io hostnames for a VPS IPv4 (no domain purchase needed).
+# Usage: ./scripts/sslip-hostnames.sh 49.13.12.34
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 STATIC_IP"
-  echo "Example: $0 54.123.45.67"
+  echo "Usage: $0 IPV4"
+  echo "Example: $0 49.13.12.34"
   exit 1
 fi
 
@@ -28,7 +28,7 @@ Add these to /opt/nexus/.env:
   ACME_EMAIL=your-email@gmail.com
 
 Telnyx webhook:
-  https://${SLIP}/api/webhooks/telnyx
+  https://${SLIP}/api/webhooks/voice/telnyx
 
 No DNS setup required — sslip.io resolves automatically.
 Wait 1–2 minutes after first deploy for Let's Encrypt certificate.
