@@ -63,9 +63,12 @@ services:
     mem_limit: 256m
 
   redis:
-    # Cache/queue only; the queue is small and Postgres is the system of record.
-    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru --save ""
-    mem_limit: 96m
+    # `noeviction` is required, not a preference: BullMQ keeps job state and
+    # locks in Redis, and any LRU policy will silently evict them and lose
+    # jobs. maxmemory is a safety ceiling only — actual use is a few MB.
+    # Persistence stays on so a restart does not drop queued work.
+    command: redis-server --maxmemory 96mb --maxmemory-policy noeviction
+    mem_limit: 160m
 
   caddy:
     # Single vhost: no files.* certificate for a host nothing serves.

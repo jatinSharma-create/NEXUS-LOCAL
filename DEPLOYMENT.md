@@ -28,7 +28,7 @@ what `docker-compose.small.yml` and `.env.production.example` already select.
 |---------|--------------|------------------------|
 | **Building on the server** | `next build` peaks well above 2 GB and gets OOM-killed | GitHub Actions builds both images and the server pulls them (`docker-compose.registry.yml`) |
 | **MinIO** | Holds 200–400 MB resident — a quarter of the box — to store a few PDFs | `STORAGE_PROVIDER=fs` writes to a local volume and serves downloads from the app |
-| **Unbounded containers** | Postgres sized for a bigger machine; nothing stopped one service starving another | Tuned Postgres, a 64 MB Redis cap, and per-service memory ceilings |
+| **Unbounded containers** | Postgres sized for a bigger machine; nothing stopped one service starving another | Tuned Postgres, a Redis memory ceiling, and per-service memory limits |
 
 Two side effects worth knowing: deploys now take about **2 minutes instead of
 45**, and the memory ceilings are set so that under real pressure the kernel

@@ -46,7 +46,7 @@ Keep entries short: what the file is for, not a diff.
      code changed.
   3. **Unbounded containers.** Postgres sized itself for a bigger machine and
      nothing stopped one service starving another. `docker-compose.small.yml`
-     tunes Postgres down, caps Redis at 64 MB, and sets per-service memory
+     tunes Postgres down, gives Redis a memory ceiling, and sets per-service memory
      ceilings chosen so that under pressure the kernel kills the PDF worker —
      which BullMQ retries — rather than Postgres.
 
@@ -300,7 +300,7 @@ in `core/` are explanatory comments only.
 | `README.md` | Env table updated to the neutral names; links to `ARCHITECTURE.md`. The "live phone calling" placeholder is now the actual tunnel + health-check procedure. |
 | `DEPLOYMENT.md` | The only production guide. 11 linear steps to put Nexus on AWS Lightsail (push branch, SSH key, API keys, instance, static IP + firewall, sslip.io hostname, bootstrap, `.env`, build, Telnyx webhook, health check, test call) plus the AWS-option comparison, budget, timings, snapshots/disk notes and a troubleshooting table. |
 | `docker-compose.prod.yml` | Production overlay: HTTPS 80/443, no public MinIO, no public app port, no ngrok. |
-| `docker-compose.small.yml` | The 2 GB profile. Drops MinIO (parks it in an unused profile and rewrites the `depends_on` that referenced it), points app and worker at a shared `files` volume with `STORAGE_PROVIDER=fs`, tunes Postgres down, caps Redis at 64 MB, and sets per-service memory ceilings. |
+| `docker-compose.small.yml` | The 2 GB profile. Drops MinIO (parks it in an unused profile and rewrites the `depends_on` that referenced it), points app and worker at a shared `files` volume with `STORAGE_PROVIDER=fs`, tunes Postgres down, and sets per-service memory ceilings. Redis gets a 96 MB ceiling with `maxmemory-policy noeviction` — required rather than preferred, since BullMQ keeps job state and locks in Redis and any LRU policy silently evicts them and loses jobs. Redis persistence is left on so a restart does not drop queued work. |
 | `docker-compose.registry.yml` | Pull prebuilt images from GHCR instead of building on the server, via `build: !reset null`. Required on 2 GB, where `next build` would be OOM-killed. Needs Compose v2.24+ for the `!reset` tag. |
 | `.github/workflows/build-images.yml` | Builds the `runner` and `worker` Dockerfile targets on every push to `deploy` and pushes them to GHCR, tagged `latest` and the commit SHA. amd64 only, matching Lightsail. Lowercases the owner with `tr` rather than bash 4's `,,`. |
 | `Caddyfile.production` | HTTPS for the 4 GB profile: app plus the MinIO `files.` vhost. |
