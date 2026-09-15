@@ -37,7 +37,7 @@ By the end, you will have Nexus running on your computer and open in your browse
 | **`develop`** | Day-to-day coding and local Docker testing |
 | **`deploy`** | Stable release — **clone this on the Hetzner CX23** (see DEPLOYMENT.md) |
 
-Recruiters using the hosted product open a URL only (no Docker). **~A$10/mo Hetzner CX23** (4 GB + IPv4) — no domain purchase needed (free sslip.io hostname). See **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+Recruiters using the hosted product open a URL only (no Docker). **€5.99 ≈ A$10/mo Hetzner CX23** in Germany/Finland (2 vCPU, 4 GB, IPv4 included), free `sslip.io` hostname, free Let's Encrypt cert. One bootstrap command does swap + Docker + clone; expect ~50 min hands-on. Phone audio is Telnyx, not the VM, so the European location does not affect call quality — only page clicks (~280 ms). OVHcloud Sydney (~A$7, ~15 ms) is documented as an alternative. Full click-by-click steps: **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
 
 ---
 

@@ -22,10 +22,18 @@ Keep entries short: what the file is for, not a diff.
 ## Current state
 
 - **Branch:** `deploy`
-- **Status:** one production guide — `DEPLOYMENT.md`. Host is **Hetzner CX23**
-  (~A$10/mo, 4 GB x86 + IPv4), not AWS/GCP.
-- **Most recent work:** switched production from Lightsail to Hetzner so a 4 GB
-  VM fits the A$10 cap. AWS/GCP 2 GB IPv4 boxes are ~A$18.
+- **Status:** production host is **Hetzner CX23** (Falkenstein/Helsinki).
+- **Most recent work:** `DEPLOYMENT.md` rewritten as a 10-step linear runbook with
+  a budget table (€5.99 ≈ A$10/mo) and a time table (~50 min hands-on). Step 5 is
+  now a single `curl | bash` of `scripts/server-bootstrap.sh`, which replaces the
+  old manual Docker install and adds a 2 GB swapfile so the Next.js image build
+  cannot be OOM-killed. OVHcloud Sydney (~A$7, ~15 ms) is an appendix rather than
+  the default: OVH cannot attach an SSH key at checkout, emails a temporary
+  password for a `ubuntu` user, forces a password change on first login, has no
+  panel firewall, and its Local Zone VPS does not support Docker. Hetzner takes
+  an SSH key at creation and logs straight in as root, so it is the faster path.
+  (SSH key, firewall, IPv4, sslip.io, `.env` line-by-line, Telnyx webhook,
+  health checks, sharing).
 
 ---
 
@@ -227,13 +235,14 @@ in `core/` are explanatory comments only.
 | `scripts/start-tunnel.sh` | Host-ngrok alternative to the `tunnel` container. Reads `HTTP_PORT` from `.env` instead of assuming `:80`, reuses the reserved domain already in `PUBLIC_APP_URL` so the webhook address survives restarts, detaches with `nohup`/`disown`, and prints the canonical `/api/webhooks/voice/<provider>` path. |
 | `scripts/verify-deploy.sh` | Confirms you are on `deploy`, production compose parses, and tsc/lint pass. |
 | `scripts/sslip-hostnames.sh` | Prints sslip.io hostnames and the Telnyx webhook from a VPS IPv4. |
-| `scripts/hetzner-bootstrap.sh` | Fresh Ubuntu CX23: install Docker, clone `deploy`, copy `.env` template. |
+| `scripts/server-bootstrap.sh` | Host-agnostic one-liner for a fresh Ubuntu box: 2 GB swapfile, Docker, clone `deploy`, copy `.env` template, then stop. Detects root vs `sudo` so it works on both Hetzner (root) and OVH (`ubuntu`). Idempotent. |
+| `scripts/hetzner-bootstrap.sh` | Compatibility wrapper → `server-bootstrap.sh`. |
 | `scripts/deploy-update.sh` | On the server: pull `deploy` and rebuild production compose. |
-| `scripts/aws-lightsail-bootstrap.sh` | Compatibility wrapper → `hetzner-bootstrap.sh`. |
+| `scripts/aws-lightsail-bootstrap.sh` | Compatibility wrapper → `server-bootstrap.sh`. |
 | `scripts/aws-deploy-update.sh` | Compatibility wrapper → `deploy-update.sh`. |
 | `.env.example` | Rewritten around provider selection with vendor credentials in their own section. Documents `NGROK_AUTHTOKEN` / `NGROK_DOMAIN` for the tunnel container. |
 | `README.md` | Env table updated to the neutral names; links to `ARCHITECTURE.md`. The "live phone calling" placeholder is now the actual tunnel + health-check procedure. |
-| `DEPLOYMENT.md` | The only production guide: Hetzner CX23, sslip.io, `.env`, Telnyx webhook, sharing, updates. |
+| `DEPLOYMENT.md` | The only production guide. 10 linear steps to put Nexus on Hetzner CX23 (SSH key, firewall, server, sslip.io hostname, bootstrap, `.env`, build, Telnyx webhook, health check, test call) plus budget, timings, troubleshooting table, and an OVH Sydney appendix. |
 | `docker-compose.prod.yml` | Production overlay: HTTPS 80/443, no public MinIO, no public app port, no ngrok. |
 | `.env.production.example` | Server env template with provider-selection vars and sslip.io hostnames. |
 
