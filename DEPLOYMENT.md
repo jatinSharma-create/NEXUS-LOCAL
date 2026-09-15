@@ -144,8 +144,11 @@ Copy that output somewhere you can paste from. You need it in step 6.
 7. Click **Create & Buy now**. Wait for status **Running**.
 8. **Copy the IPv4 address.** It looks like `49.13.12.34`.
 
-> Must say **CX23**, **4 GB**, and **x86**. A CAX/Ampere box is ARM and a 2 GB
-> box runs out of memory while generating PDFs.
+> Must say **CX23**, **4 GB**, and **x86**. A 2 GB box runs out of memory
+> generating PDFs. Hetzner's ARM boxes (CAX series) are cheaper and would
+> probably work — Alpine ships Chromium for ARM — but this stack has only ever
+> been run on x86, so ARM is an untested variable on your first deploy. Get it
+> working on CX23 first.
 
 Everywhere below, replace `YOUR_IP` with that address.
 
