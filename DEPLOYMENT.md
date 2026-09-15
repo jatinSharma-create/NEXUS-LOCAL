@@ -282,6 +282,19 @@ TELNYX_CALLER_ID=+61...
 TELNYX_SIP_URI=sip:yourusername@sip.telnyx.com
 ```
 
+> **Use whatever number you already have.** A `+1` caller ID works fine and
+> costs the same — Telnyx bills outbound calls by the number you are *calling*,
+> not the number you are calling *from*. An Australian `+61` caller ID does not
+> make calls cheaper; it makes candidates far more likely to pick up, which is
+> what actually lowers your cost per completed screening.
+>
+> Buying a `+61` number is not instant: Telnyx needs an Australian address plus
+> proof of address dated within 3 months, and takes about **72 hours** to
+> validate. So **order it now and deploy with what you have.** Switching later
+> is one line — change `TELNYX_CALLER_ID` in `.env`, then
+> `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`.
+> No rebuild.
+
 Leave everything else exactly as it came. Save and exit.
 
 **6d. Check it:**
