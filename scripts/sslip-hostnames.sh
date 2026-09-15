@@ -15,18 +15,19 @@ SLIP="${IP//./-}.sslip.io"
 
 cat <<EOF
 
-Free hostnames for IP ${IP} (no domain purchase):
+Free hostname for IP ${IP} (no domain purchase):
 
-  App:    https://${SLIP}
-  Files:  https://files.${SLIP}
+  App:  https://${SLIP}
 
-Add these to /opt/nexus/.env:
+Add these three lines to /opt/nexus/.env:
 
   DOMAIN=${SLIP}
-  FILES_DOMAIN=files.${SLIP}
   PUBLIC_APP_URL=https://${SLIP}
-  MINIO_PUBLIC_ENDPOINT=https://files.${SLIP}
   ACME_EMAIL=your-email@gmail.com
+
+One hostname is all you need: downloads are served by the app itself at
+/api/files. (On the 4 GB profile, where MinIO runs, you would also set
+FILES_DOMAIN=files.${SLIP} and MINIO_PUBLIC_ENDPOINT=https://files.${SLIP}.)
 
 Telnyx webhook:
   https://${SLIP}/api/webhooks/voice/telnyx

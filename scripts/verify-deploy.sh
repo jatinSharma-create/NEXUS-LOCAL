@@ -15,7 +15,25 @@ command -v docker >/dev/null || fail "docker is not installed"
 ok "docker CLI present"
 
 docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/dev/null
-ok "production compose file parses"
+ok "production compose file parses (4 GB profile)"
+
+# The 2 GB profile is what actually ships, so check that chain too.
+SMALL_FILES=(-f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.small.yml -f docker-compose.registry.yml)
+docker compose "${SMALL_FILES[@]}" config >/dev/null
+ok "2 GB compose chain parses (small + registry)"
+
+small_services="$(docker compose "${SMALL_FILES[@]}" config --services 2>/dev/null | sort | tr '\n' ' ')"
+[[ "$small_services" == "app caddy db redis worker " ]] \
+  || fail "2 GB profile should run exactly: app caddy db redis worker — got: $small_services"
+ok "2 GB profile runs 5 services, MinIO excluded"
+
+docker compose "${SMALL_FILES[@]}" config 2>/dev/null | grep -q "STORAGE_PROVIDER: fs" \
+  || fail "2 GB profile is not selecting STORAGE_PROVIDER=fs"
+ok "2 GB profile uses filesystem storage"
+
+docker compose "${SMALL_FILES[@]}" config 2>/dev/null | grep -qE "^\s+build:" \
+  && fail "2 GB profile still has a build: section — it must pull prebuilt images"
+ok "2 GB profile pulls images instead of building"
 
 if docker info >/dev/null 2>&1; then
   ok "docker daemon is running"

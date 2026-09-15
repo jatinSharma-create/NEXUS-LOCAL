@@ -1,0 +1,17 @@
+# Production Caddy for the 2 GB profile — HTTPS via Let's Encrypt.
+#
+# One vhost only. There is no FILES_DOMAIN block because STORAGE_PROVIDER=fs
+# serves downloads from the app itself at /api/files. Asking for a second
+# certificate would spend another request against the shared sslip.io quota
+# for a hostname nothing listens on.
+
+{
+	email {env.ACME_EMAIL}
+}
+
+{env.DOMAIN} {
+	encode gzip
+
+	# PDFs and resumes stream from the files volume through the app.
+	reverse_proxy app:3000
+}

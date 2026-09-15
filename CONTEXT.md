@@ -22,11 +22,51 @@ Keep entries short: what the file is for, not a diff.
 ## Current state
 
 - **Branch:** `deploy`
-- **Status:** production host is **AWS Lightsail Medium** (US$24/mo, 2 vCPU,
-  4 GB, 80 GB SSD) in **Sydney, ap-southeast-2**.
-- **Most recent work:** moved production from Hetzner to **AWS Lightsail** at the
-  user's request. `DEPLOYMENT.md` is an 11-step linear runbook with a budget table
-  (US$24 ≈ A$36/mo) and a time table (~50 min hands-on).
+- **Status:** production host is **AWS Lightsail Small** (US$12/mo, 2 vCPU,
+  2 GB, 60 GB SSD) in **Sydney, ap-southeast-2**.
+- **Most recent work: made the stack fit 2 GB** so the host could drop from
+  US$24 to US$12 (A$36 → A$18). The user asked for this to be solved with
+  internal code changes rather than by changing the plan, so the fixes are in
+  the codebase, not the runbook.
+
+  **What actually did not fit, and what replaced it.** A 2 GB instance leaves
+  roughly 1.5 GB for containers after Ubuntu and the Docker daemon. Three
+  things exceeded that:
+
+  1. **Building on the server.** `next build` peaks well above 2 GB and gets
+     OOM-killed. Fixed by moving builds off-box: `.github/workflows/build-images.yml`
+     builds the `runner` and `worker` targets on every push to `deploy` and
+     pushes them to GHCR; `docker-compose.registry.yml` swaps `build:` for
+     `image:` so the server only pulls. Side effect: deploys went from ~45
+     minutes to ~2.
+  2. **MinIO.** It holds 200–400 MB resident — a quarter of the box — to store
+     a handful of PDFs and resumes. Replaced with a new `fs` storage provider
+     (below) selected by `STORAGE_PROVIDER=fs`. The `ObjectStore` port already
+     anticipated this ("a plain filesystem can satisfy this"), so no calling
+     code changed.
+  3. **Unbounded containers.** Postgres sized itself for a bigger machine and
+     nothing stopped one service starving another. `docker-compose.small.yml`
+     tunes Postgres down, caps Redis at 64 MB, and sets per-service memory
+     ceilings chosen so that under pressure the kernel kills the PDF worker —
+     which BullMQ retries — rather than Postgres.
+
+  The PDF path still uses headless Chromium. It was not replaced: BullMQ
+  already runs one job at a time, so only one browser is ever alive, and a
+  768 MB ceiling plus 4 GB of swap covers a render. Swapping in a pure-JS
+  generator would have meant reimplementing the transcript layout for a
+  smaller saving.
+
+  **One real bug found while verifying.** The `runner` image runs as `nextjs`
+  (uid 1001), and a named volume mounts root-owned 755 by default, so resume
+  uploads would have failed with `EACCES`. The Dockerfile now creates and
+  chowns `/data/files` before `USER nextjs`, which makes Docker seed the empty
+  volume with that ownership. Verified in the built images: the app writes
+  `resumes/`, the root worker writes `transcripts/`, and each reads the
+  other's files.
+
+  **Commands got shorter.** `COMPOSE_FILE` in `.env` now selects the four
+  compose files, so every documented command is a plain `docker compose …`
+  with no `-f` flags. Moving to the 4 GB plan is one line in `.env`.
 
   **Why Lightsail over the rest of AWS.** The stack is a Docker Compose file and
   Lightsail is a plain Ubuntu VM, so it runs unchanged. ECS Fargate and App Runner
@@ -204,7 +244,8 @@ in `core/` are explanatory comments only.
 | `app/modules/documents/index.ts` | Registry + `generateCallTranscriptPdf()`. |
 | `app/modules/storage/core/ports.ts` | `ObjectStore` — `put` and `signedUrl`. |
 | `app/modules/storage/providers/s3.ts` | S3-compatible store (MinIO, AWS, R2). Clients are created lazily. |
-| `app/modules/storage/index.ts` | Registry + `uploadFile()` / `getPresignedUrl()`. |
+| `app/modules/storage/providers/fs.ts` | Local-disk store for instances too small to run MinIO. Writes to `NEXUS_FILES_DIR` (a volume shared by app and worker) with a sidecar holding the content type, since a filesystem has nowhere else for object metadata. Stands in for presigned URLs by signing `/api/files/...` links with an HMAC and expiry; `openSignedFile()` is the verifying read side. Rejects keys that escape the root. |
+| `app/modules/storage/index.ts` | Registry + `uploadFile()` / `getPresignedUrl()`. Registers both `s3` and `fs`, and re-exports `openSignedFile` so the route uses the module's public entry point. |
 
 ### Other
 
@@ -233,6 +274,7 @@ in `core/` are explanatory comments only.
 | `app/app/api/candidates/[id]/status/route.ts` | Uses `candidatesRepo`. |
 | `app/app/api/candidates/[id]/notes/route.ts` | Uses `notesRepo`. |
 | `app/app/api/candidates/upload/route.ts` | Uses `candidatesRepo`, `@/modules/intelligence`, `@/modules/storage`. |
+| `app/app/api/files/[...key]/route.ts` | Serves the `fs` provider's signed links: verifies signature and expiry, then streams the file rather than buffering it (the app runs with a 320 MB heap cap). Left inside the `middleware.ts` session gate on purpose, so a leaked link is not enough on its own. Unused when `STORAGE_PROVIDER=s3`. |
 | `app/app/calls/page.tsx` | `callsRepo.listRecentCalls()`. Distinguishes "Declined recording" (press 2) from a call that never reached consent. |
 | `app/app/calls/[callId]/page.tsx` | `callsRepo.findCallDetail()` + `candidatesRepo`. Explains on the call page that press 2 means no transcript or PDF by design. |
 | `app/app/candidates/page.tsx` | `candidatesRepo.getCandidates()`. |
@@ -247,18 +289,24 @@ in `core/` are explanatory comments only.
 | `docker-compose.yml` | Added provider-selection and neutral calling env vars; grouped vendor credentials separately. Added the opt-in `tunnel` service (ngrok → `caddy:80`, `--profile tunnel`) so the public URL webhooks need is managed by Docker rather than a terminal session. |
 | `scripts/start-tunnel.sh` | Host-ngrok alternative to the `tunnel` container. Reads `HTTP_PORT` from `.env` instead of assuming `:80`, reuses the reserved domain already in `PUBLIC_APP_URL` so the webhook address survives restarts, detaches with `nohup`/`disown`, and prints the canonical `/api/webhooks/voice/<provider>` path. |
 | `scripts/verify-deploy.sh` | Confirms you are on `deploy`, production compose parses, and tsc/lint pass. |
-| `scripts/sslip-hostnames.sh` | Prints sslip.io hostnames and the Telnyx webhook from a VPS IPv4. |
-| `scripts/server-bootstrap.sh` | Host-agnostic one-liner for a fresh Ubuntu box: 2 GB swapfile, Docker, clone `deploy`, copy `.env` template, then stop. Detects root vs `sudo`, so it works on Lightsail/OVH (`ubuntu`) and bare VPS images (`root`). Adds the login user to the `docker` group. Swap is non-fatal — `fallocate` falls back to `dd`, and total failure still lets Docker install. Idempotent. |
+| `scripts/sslip-hostnames.sh` | Prints the sslip.io hostname and Telnyx webhook from a VPS IPv4. Emits one hostname, since filesystem storage removed the separate `files.` host; notes the extra MinIO lines for the 4 GB profile. |
+| `scripts/server-bootstrap.sh` | Host-agnostic one-liner for a fresh Ubuntu box: swapfile, Docker, clone `deploy`, copy `.env` template, then stop. Swap is sized from actual RAM — 4 GB on a 2 GB instance, 2 GB otherwise — because Chromium render spikes have less real memory to borrow. Detects root vs `sudo`, so it works on Lightsail/OVH (`ubuntu`) and bare VPS images (`root`). Adds the login user to the `docker` group. Swap is non-fatal — `fallocate` falls back to `dd`, and total failure still lets Docker install. Idempotent. |
 | `scripts/hetzner-bootstrap.sh` | Compatibility wrapper → `server-bootstrap.sh`. |
 | `scripts/verify-deploy.sh` | Pre-ship gate: asserts branch is `deploy`, production compose parses, then `tsc --noEmit` and `next lint`. |
-| `scripts/deploy-update.sh` | On the server: pull `deploy` and rebuild production compose. |
+| `scripts/deploy-update.sh` | On the server: pull `deploy`, then either pull prebuilt images or build locally depending on whether `COMPOSE_FILE` includes the registry override. Prunes old images afterwards. |
 | `scripts/aws-lightsail-bootstrap.sh` | Compatibility wrapper → `server-bootstrap.sh`. |
 | `scripts/aws-deploy-update.sh` | Compatibility wrapper → `deploy-update.sh`. |
 | `.env.example` | Rewritten around provider selection with vendor credentials in their own section. Documents `NGROK_AUTHTOKEN` / `NGROK_DOMAIN` for the tunnel container. |
 | `README.md` | Env table updated to the neutral names; links to `ARCHITECTURE.md`. The "live phone calling" placeholder is now the actual tunnel + health-check procedure. |
 | `DEPLOYMENT.md` | The only production guide. 11 linear steps to put Nexus on AWS Lightsail (push branch, SSH key, API keys, instance, static IP + firewall, sslip.io hostname, bootstrap, `.env`, build, Telnyx webhook, health check, test call) plus the AWS-option comparison, budget, timings, snapshots/disk notes and a troubleshooting table. |
 | `docker-compose.prod.yml` | Production overlay: HTTPS 80/443, no public MinIO, no public app port, no ngrok. |
-| `.env.production.example` | Server env template with provider-selection vars and sslip.io hostnames. |
+| `docker-compose.small.yml` | The 2 GB profile. Drops MinIO (parks it in an unused profile and rewrites the `depends_on` that referenced it), points app and worker at a shared `files` volume with `STORAGE_PROVIDER=fs`, tunes Postgres down, caps Redis at 64 MB, and sets per-service memory ceilings. |
+| `docker-compose.registry.yml` | Pull prebuilt images from GHCR instead of building on the server, via `build: !reset null`. Required on 2 GB, where `next build` would be OOM-killed. Needs Compose v2.24+ for the `!reset` tag. |
+| `.github/workflows/build-images.yml` | Builds the `runner` and `worker` Dockerfile targets on every push to `deploy` and pushes them to GHCR, tagged `latest` and the commit SHA. amd64 only, matching Lightsail. Lowercases the owner with `tr` rather than bash 4's `,,`. |
+| `Caddyfile.production` | HTTPS for the 4 GB profile: app plus the MinIO `files.` vhost. |
+| `Caddyfile.small` | HTTPS for the 2 GB profile. One vhost, because downloads come from the app at `/api/files` — a second cert would spend another request against the shared sslip.io quota for a host nothing serves. |
+| `app/Dockerfile` | Multi-stage: `deps`, `builder`, `worker` (adds Chromium), `runner` (Next.js standalone, default target). `runner` creates and chowns `/data/files` before `USER nextjs`, so Docker seeds the `files` volume with that ownership — without it the volume mounts root-owned and resume uploads fail with `EACCES`. |
+| `.env.production.example` | Server env template. Defaults to the 2 GB profile: `COMPOSE_FILE` selects the four compose files so every command is a bare `docker compose …`, plus `STORAGE_PROVIDER=fs`, `FILES_SIGNING_SECRET` and the GHCR image owner. Keeps a commented block for moving back to 4 GB with MinIO. |
 
 ---
 

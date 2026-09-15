@@ -1,0 +1,25 @@
+# Pull prebuilt images instead of building on the server.
+#
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.prod.yml \
+#                  -f docker-compose.small.yml \
+#                  -f docker-compose.registry.yml up -d
+#
+# Required on a 2 GB instance: `npm run build` peaks above 2 GB and will be
+# OOM-killed there. GitHub Actions builds these on every push to `deploy`
+# (see .github/workflows/build-images.yml) and pushes them to GHCR.
+#
+# Set NEXUS_IMAGE_OWNER to your lowercase GitHub username or org.
+# Set NEXUS_IMAGE_TAG to a commit SHA to pin, or leave it at `latest`.
+
+services:
+  app:
+    image: ghcr.io/${NEXUS_IMAGE_OWNER:-jatinsharma-create}/nexus-app:${NEXUS_IMAGE_TAG:-latest}
+    # Override the inherited `build:` so compose never tries to build here.
+    build: !reset null
+    pull_policy: always
+
+  worker:
+    image: ghcr.io/${NEXUS_IMAGE_OWNER:-jatinsharma-create}/nexus-worker:${NEXUS_IMAGE_TAG:-latest}
+    build: !reset null
+    pull_policy: always

@@ -1,0 +1,85 @@
+# Overrides for a 2 GB instance (AWS Lightsail US$12 "Small").
+#
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.prod.yml \
+#                  -f docker-compose.small.yml up -d
+#
+# Three things do not fit in 2 GB, and this file addresses two of them:
+#
+#   1. MinIO holds 200-400 MB resident. Replaced with STORAGE_PROVIDER=fs,
+#      which writes to the `files` volume shared by app and worker.
+#   2. Postgres defaults assume a bigger box. Tuned down below.
+#   3. The Next.js image build peaks well above 2 GB. That one cannot be
+#      fixed here — build off-box and pull. See docker-compose.registry.yml.
+#
+# Memory ceilings are set so the kernel kills the PDF worker (recoverable,
+# BullMQ retries) rather than Postgres (not recoverable) under pressure.
+
+services:
+  app:
+    environment:
+      - STORAGE_PROVIDER=fs
+      - NEXUS_FILES_DIR=/data/files
+      - FILES_SIGNING_SECRET=${FILES_SIGNING_SECRET:-}
+      # Keep the server well under its ceiling; it serves, it does not build.
+      - NODE_OPTIONS=--max-old-space-size=320
+    volumes:
+      - files:/data/files
+    # Drop the MinIO dependency; it is not started on this profile.
+    depends_on: !override
+      - db
+      - redis
+    mem_limit: 512m
+    memswap_limit: 1g
+
+  worker:
+    environment:
+      - STORAGE_PROVIDER=fs
+      - NEXUS_FILES_DIR=/data/files
+      - FILES_SIGNING_SECRET=${FILES_SIGNING_SECRET:-}
+      - NODE_OPTIONS=--max-old-space-size=256
+    volumes:
+      - files:/data/files
+    depends_on: !override
+      - db
+      - redis
+    # Chromium needs headroom for one render. BullMQ defaults to concurrency 1,
+    # so only ever one browser at a time.
+    mem_limit: 768m
+    memswap_limit: 1536m
+
+  db:
+    # Defaults size themselves for a much larger machine.
+    command: >
+      postgres
+      -c shared_buffers=96MB
+      -c effective_cache_size=256MB
+      -c max_connections=25
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+      -c max_worker_processes=2
+      -c max_parallel_workers=1
+      -c max_parallel_workers_per_gather=0
+    mem_limit: 256m
+
+  redis:
+    # Cache/queue only; the queue is small and Postgres is the system of record.
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru --save ""
+    mem_limit: 96m
+
+  caddy:
+    # Single vhost: no files.* certificate for a host nothing serves.
+    volumes: !override
+      - ./Caddyfile.small:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: !override
+      - app
+    mem_limit: 96m
+
+  # MinIO is not started on this profile. STORAGE_PROVIDER=fs replaces it.
+  storage:
+    profiles: ["unused"]
+
+volumes:
+  files:

@@ -46,6 +46,13 @@ RUN adduser --system --uid 1001 nextjs
 RUN mkdir .next
 RUN chown nextjs:nodejs .next
 
+# Mount point for the `fs` storage provider (STORAGE_PROVIDER=fs, used on 2 GB
+# instances instead of MinIO). Docker seeds an empty named volume from the
+# image, ownership included, so the server — which runs as nextjs, not root —
+# can write resume uploads here. Without this the volume lands root-owned 755
+# and uploads fail with EACCES. The worker runs as root and is unaffected.
+RUN mkdir -p /data/files && chown -R nextjs:nodejs /data
+
 # Automatically leverage output traces to reduce image size
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static

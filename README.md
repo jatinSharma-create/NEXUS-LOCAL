@@ -37,9 +37,19 @@ By the end, you will have Nexus running on your computer and open in your browse
 | **`develop`** | Day-to-day coding and local Docker testing |
 | **`deploy`** | Stable release — **clone this on the Lightsail instance** (see DEPLOYMENT.md) |
 
-Recruiters using the hosted product open a URL only (no Docker). **AWS Lightsail Medium, US$24 ≈ A$36/mo** in **Sydney (ap-southeast-2)** — 2 vCPU, 4 GB, 80 GB SSD, static IPv4 and 4 TB transfer all bundled into the flat price. Free `sslip.io` hostname, free Let's Encrypt cert. One bootstrap command does swap + Docker + clone; expect ~50 min hands-on. New AWS accounts get up to US$200 in credits, which covers the first several months.
+Recruiters using the hosted product open a URL only (no Docker). **AWS Lightsail Small, US$12 ≈ A$18/mo** in **Sydney (ap-southeast-2)** — 2 vCPU, 2 GB, 60 GB SSD, static IPv4 and 3 TB transfer all bundled into the flat price. Free `sslip.io` hostname, free Let's Encrypt cert. One bootstrap command does swap + Docker + clone; expect ~50 min hands-on. New AWS accounts get up to US$200 in credits, which covers the whole 6-month credit window at this price.
 
 Lightsail is chosen because the stack is a Docker Compose file and Lightsail is a plain Ubuntu VM, so it runs unchanged. ECS/Fargate would mean replacing Postgres, Redis and MinIO with RDS, ElastiCache and S3 (a rewrite, A$130+/mo); plain EC2 costs more for the same specs once IPv4, EBS and egress are billed separately. Full click-by-click steps: **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+
+**Fitting 2 GB** took three changes, all already in the repo and selected by `COMPOSE_FILE` in `.env.production.example`:
+
+| Change | Why | Where |
+|--------|-----|-------|
+| Images built on GitHub Actions, pulled from GHCR | `next build` peaks above 2 GB and is OOM-killed on the box | `.github/workflows/build-images.yml`, `docker-compose.registry.yml` |
+| `STORAGE_PROVIDER=fs` instead of MinIO | MinIO holds 200–400 MB resident to store a few PDFs | `app/modules/storage/providers/fs.ts`, `app/app/api/files/[...key]/route.ts` |
+| Tuned Postgres, capped Redis, per-service memory ceilings | Defaults assume a bigger machine; ceilings make the retryable PDF worker the first thing evicted, not Postgres | `docker-compose.small.yml` |
+
+Side effect: deploys became ~2 minutes instead of ~45, because the server only pulls. The 4 GB (US$24) path still works — it is one `COMPOSE_FILE` line.
 
 ---
 
@@ -565,6 +575,11 @@ When you use Docker, Nexus stores your real data in **Docker volumes** on your c
 | Candidates, notes, call records | Docker volume `pgdata` (Postgres database) |
 | Resumes, recordings, PDFs | Docker volume `miniodata` (MinIO storage) |
 | Temporary queue data | Docker volume `redisdata` |
+
+Local development uses MinIO, as above. The deployed 2 GB profile does not run
+MinIO — it stores the same files in a `files` volume and serves them from the
+app. Both satisfy the same `ObjectStore` port, so application code is identical
+either way.
 
 Your `.env` file also stays on your computer. It is **not** downloaded from GitHub (and git will not overwrite it when you pull).
 

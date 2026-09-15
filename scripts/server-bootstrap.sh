@@ -11,7 +11,19 @@ set -euo pipefail
 REPO_URL="${NEXUS_REPO_URL:-https://github.com/jatinSharma-create/NEXUS-LOCAL.git}"
 BRANCH="${NEXUS_BRANCH:-deploy}"
 INSTALL_DIR="${NEXUS_INSTALL_DIR:-/opt/nexus}"
-SWAP_SIZE="${NEXUS_SWAP_SIZE:-2G}"
+
+# A 2 GB instance needs more swap headroom than a 4 GB one, because Chromium
+# render spikes and Postgres have less real memory to share.
+if [[ -z "${NEXUS_SWAP_SIZE:-}" ]]; then
+  total_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 4096)
+  if [[ "$total_mb" -lt 3000 ]]; then
+    SWAP_SIZE="4G"
+  else
+    SWAP_SIZE="2G"
+  fi
+else
+  SWAP_SIZE="$NEXUS_SWAP_SIZE"
+fi
 
 # Lightsail and OVH log in as a sudo user; bare VPS images log in as root.
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -32,8 +44,10 @@ add_swap() {
     return 0
   fi
   # fallocate is instant but unsupported on some filesystems; dd always works.
+  local dd_mb="${SWAP_SIZE%G}"
+  dd_mb=$(( dd_mb * 1024 ))
   $SUDO fallocate -l "$SWAP_SIZE" /swapfile 2>/dev/null \
-    || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+    || $SUDO dd if=/dev/zero of=/swapfile bs=1M count="$dd_mb" status=none
   $SUDO chmod 600 /swapfile
   $SUDO mkswap /swapfile >/dev/null
   $SUDO swapon /swapfile
@@ -85,14 +99,16 @@ cat <<EOF
   1. Fill in the environment file:
        nano $INSTALL_DIR/.env
 
-     Required: DOMAIN, FILES_DOMAIN, PUBLIC_APP_URL,
-               MINIO_PUBLIC_ENDPOINT, ACME_EMAIL,
-               APP_PASSWORD, MINIO_SECRET_KEY,
+     Required: DOMAIN, PUBLIC_APP_URL, ACME_EMAIL, APP_PASSWORD,
+               FILES_SIGNING_SECRET, NEXUS_IMAGE_OWNER,
                and your Telnyx / Groq / Gemini keys.
 
-  2. Build and start (takes 15-30 minutes, unattended):
+     COMPOSE_FILE in that file already selects the right profile, so the
+     commands below need no -f flags.
+
+  2. Start it (about 2 minutes — images are prebuilt):
        cd $INSTALL_DIR
-       docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+       docker compose up -d
 ============================================================
 
 EOF

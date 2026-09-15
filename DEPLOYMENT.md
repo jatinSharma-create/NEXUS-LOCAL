@@ -7,32 +7,54 @@ They install nothing.
 
 ## Why Lightsail and not the rest of AWS
 
-Your app is a Docker Compose file with six services. Lightsail is a plain
-Ubuntu VM, so it runs that file unchanged.
+Your app is a Docker Compose file. Lightsail is a plain Ubuntu VM, so it runs
+that file with a small override rather than a rewrite.
 
 | AWS option | A$ / month | Verdict |
 |------------|-----------:|---------|
-| **Lightsail Medium 4 GB** | **36** | **Chosen.** Flat price, IPv4 and 4 TB transfer bundled, Sydney region. |
-| Lightsail Small 2 GB | 18 | Too little RAM. The Chromium PDF worker gets killed. |
-| EC2 t3.medium | ~76 | Same specs, more money — IPv4, EBS and egress all billed separately. |
+| **Lightsail Small 2 GB** | **18** | **Chosen.** Needs the three changes below, which are already in the repo. |
+| Lightsail Medium 4 GB | 36 | Same thing with room to spare. Move up if you outgrow 2 GB. |
+| EC2 t3.small | ~50 | Same specs, more money — IPv4, EBS and egress all billed separately. |
 | ECS Fargate / App Runner | 130+ | Stateless. Postgres, Redis and MinIO would become RDS, ElastiCache and S3. A rewrite. |
+
+### What had to change to fit 2 GB
+
+A 2 GB instance leaves roughly **1.5 GB** for containers once Ubuntu and the
+Docker daemon have taken their share. Three things did not fit, so the repo now
+does each of them differently. You do not have to configure any of this — it is
+what `docker-compose.small.yml` and `.env.production.example` already select.
+
+| Problem | Why it broke | What the repo does now |
+|---------|--------------|------------------------|
+| **Building on the server** | `next build` peaks well above 2 GB and gets OOM-killed | GitHub Actions builds both images and the server pulls them (`docker-compose.registry.yml`) |
+| **MinIO** | Holds 200–400 MB resident — a quarter of the box — to store a few PDFs | `STORAGE_PROVIDER=fs` writes to a local volume and serves downloads from the app |
+| **Unbounded containers** | Postgres sized for a bigger machine; nothing stopped one service starving another | Tuned Postgres, a 64 MB Redis cap, and per-service memory ceilings |
+
+Two side effects worth knowing: deploys now take about **2 minutes instead of
+45**, and the memory ceilings are set so that under real pressure the kernel
+kills the PDF worker — which BullMQ simply retries — rather than Postgres.
+
+The PDF worker still uses headless Chromium. It gets a 768 MB ceiling and
+BullMQ runs one job at a time, so only one browser is ever alive.
 
 ## Budget
 
 | Item | Cost |
 |------|------|
-| Lightsail **Medium** (2 vCPU, 4 GB, 80 GB SSD) | US$24 / month |
+| Lightsail **Small** (2 vCPU, 2 GB, 60 GB SSD) | US$12 / month |
 | Static IPv4 address | **US$0** — free while attached |
-| Data transfer (4 TB included) | **US$0** |
+| Data transfer (3 TB included) | **US$0** |
+| Image builds on GitHub Actions | **US$0** — free for public repos, 2,000 min/month on free private |
+| Container registry (GHCR) | **US$0** |
 | Domain name | **US$0** — free `sslip.io` hostname |
 | HTTPS certificate | **US$0** — Let's Encrypt |
-| **Total** | **US$24 ≈ A$36 / month** |
+| **Total** | **US$12 ≈ A$18 / month** |
 
 Billed hourly up to that monthly cap. Delete the instance and it stops.
 
 **New AWS accounts get up to US$200 in credits** — US$100 at signup and up to
-US$100 more for trying services — valid for 6 months. That covers roughly your
-first four to eight months outright.
+US$100 more for trying services — valid for 6 months. At US$12/month the
+credits cover the whole 6-month window with plenty left over.
 
 Telnyx, Groq and Gemini bill separately for usage.
 
@@ -44,17 +66,18 @@ Telnyx, Groq and Gemini bill separately for usage.
 
 | Phase | Time | Hands-on? |
 |-------|------|-----------|
-| 0. Push the `deploy` branch | 1 min | yes |
+| 0. Push the `deploy` branch, let Actions build | 1 min + 10 min waiting | mostly waiting |
 | 1–2. SSH key, collect API keys | 5 min | yes |
 | 3. Create the instance | 10 min | yes |
 | 4. Static IP + firewall | 5 min | yes |
 | 5. Free hostname | 2 min | yes |
 | 6. Connect and bootstrap | 5 min | mostly waiting |
 | 7. Fill in `.env` | 10 min | yes |
-| 8. Build | 30–45 min | **no** — walk away |
+| 8. Pull and start | 2–3 min | **no** |
 | 9–11. Telnyx, verify, test call | 15 min | yes |
 
-**About 50 minutes of your attention, ~1.5 hours wall clock.**
+**About 50 minutes of your attention, ~1 hour wall clock.** The build step that
+used to take 45 minutes now happens on GitHub while you create the instance.
 
 ---
 
@@ -68,19 +91,49 @@ Telnyx, Groq and Gemini bill separately for usage.
 
 ---
 
-## Step 0 — Push the deploy branch (1 min, do this first)
+## Step 0 — Push the deploy branch and let GitHub build (1 min, then it runs on its own)
 
-The server pulls everything from GitHub, so the code must be there first.
+The server no longer builds anything — it pulls finished images. Pushing to
+`deploy` is what triggers that build, so do this **first** and let it run while
+you work through steps 1 to 7.
 
 ```bash
 cd ~/Desktop/NEXUS-LOCAL && git checkout deploy && git push origin deploy
 ```
 
-Confirm — this must print the script, not `404`:
+Confirm the code is on GitHub — this must print the script, not `404`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jatinSharma-create/NEXUS-LOCAL/deploy/scripts/server-bootstrap.sh | head -3
 ```
+
+### 0a — Watch the build
+
+Open **[the Actions tab](https://github.com/jatinSharma-create/NEXUS-LOCAL/actions)**.
+You want the **"Build and publish images"** run to finish with two green checks
+(`runner` and `worker`). First run takes **8–12 minutes**; later ones are 2–4
+because the layers are cached.
+
+If the tab says workflows are disabled, click **"I understand my workflows,
+enable them"**.
+
+### 0b — Make the two images public (one time, 2 min)
+
+Your server pulls from GHCR. Public images need no password on the server,
+which is one less secret to manage. The images contain your compiled app, not
+your `.env` — all keys stay on the server.
+
+1. Go to **[your packages](https://github.com/jatinSharma-create?tab=packages)**
+2. Click **`nexus-app`** → **Package settings** (right sidebar)
+3. Scroll to **Danger Zone** → **Change visibility** → **Public** → confirm by typing the package name
+4. Repeat for **`nexus-worker`**
+
+> **Prefer to keep them private?** Leave visibility alone and instead create a
+> [classic token](https://github.com/settings/tokens/new) with only
+> `read:packages`, then run this on the server after Step 6:
+> ```bash
+> echo 'YOUR_TOKEN' | docker login ghcr.io -u jatinSharma-create --password-stdin
+> ```
 
 ---
 
@@ -135,16 +188,19 @@ Copy that output somewhere you can paste from. You need it in step 7.
    | Blueprint | **OS Only** → **Ubuntu 24.04 LTS** |
    | Networking | **Dual-stack** (IPv4 + IPv6) |
    | SSH key pair | **Create new** → **Download** the `.pem`, or upload your step 1 key |
-   | Instance plan | **US$24/month** — 2 vCPU, **4 GB RAM**, 80 GB SSD |
+   | Instance plan | **US$12/month** — 2 vCPU, **2 GB RAM**, 60 GB SSD |
    | Name | `nexus` |
 
 5. Click **Create instance**. Wait for **Running**.
 
-> **Three ways to get this wrong:**
+> **Two ways to get this wrong:**
 > - **Do not pick IPv6-only.** It saves US$4 but Let's Encrypt and Telnyx
 >   webhooks need IPv4. You will not get a certificate.
-> - **Do not pick the US$12 plan.** 2 GB is not enough; the PDF worker dies.
 > - **Do not pick a Blueprint app** like "Node.js". You want **OS Only**.
+
+> **Do not pick the US$5 or US$7 plan.** Those have 512 MB and 1 GB. Even with
+> MinIO gone and the build moved off-box, Postgres plus Chromium will not fit.
+> US$12 is the floor for this stack.
 
 If you downloaded the `.pem`, lock it down now or SSH will refuse it:
 
@@ -197,8 +253,12 @@ On your **Mac**:
 cd ~/Desktop/NEXUS-LOCAL && ./scripts/sslip-hostnames.sh YOUR_IP
 ```
 
-Copy all five lines it prints — that is your `.env` block and your Telnyx
-webhook. For `13.55.12.34` the site would be `https://13-55-12-34.sslip.io`.
+Copy the lines it prints — that is your `.env` block and your Telnyx webhook.
+For `13.55.12.34` the site would be `https://13-55-12-34.sslip.io`.
+
+You only need **one** hostname now. On the 4 GB profile MinIO needed a second
+`files.` hostname and its own certificate; with filesystem storage the app
+serves downloads at `/api/files`, so there is one vhost and one certificate.
 
 > **One risk to know.** Every `sslip.io` user shares a single Let's Encrypt
 > certificate quota, because `sslip.io` is deliberately not on the Public
@@ -210,21 +270,21 @@ webhook. For `13.55.12.34` the site would be `https://13-55-12-34.sslip.io`.
 
 ### Step 5b — Using a real domain instead (optional, 10 min)
 
-Buy any cheap `.com` or `.xyz`. At your registrar add two **A records**, both
-pointing at `YOUR_IP`:
+Buy any cheap `.com` or `.xyz`. At your registrar add **one A record** pointing
+at `YOUR_IP`:
 
 | Type | Name | Value |
 |------|------|-------|
 | A | `nexus` | `YOUR_IP` |
-| A | `files.nexus` | `YOUR_IP` |
 
-Then use your own names in step 7:
+One record is enough on this profile — downloads are served by the app, so
+there is no separate `files.` host to point anywhere.
+
+Then use your own name in step 7:
 
 ```env
 DOMAIN=nexus.yourdomain.com
-FILES_DOMAIN=files.nexus.yourdomain.com
 PUBLIC_APP_URL=https://nexus.yourdomain.com
-MINIO_PUBLIC_ENDPOINT=https://files.nexus.yourdomain.com
 ```
 
 Check it resolves before step 8:
@@ -256,10 +316,13 @@ Confirm the machine is what you paid for:
 uname -m && free -h
 ```
 
-`x86_64` and about **3.8 Gi** of memory. If memory says 1.9 Gi you are on the
-US$12 plan — stop and resize before going further.
+You want `x86_64` and about **1.9 Gi** of memory — that is the US$12 plan,
+which is what the rest of this guide assumes. If it says 3.8 Gi you are on the
+US$24 plan, which also works; see the note at the end of Step 7.
 
-Now run the bootstrap. It adds swap, installs Docker, and clones the code:
+Now run the bootstrap. It adds swap, installs Docker, and clones the code.
+On a 2 GB box it allocates **4 GB of swap** rather than 2, to absorb Chromium
+render spikes without the kernel killing anything:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jatinSharma-create/NEXUS-LOCAL/deploy/scripts/server-bootstrap.sh | bash
@@ -288,22 +351,36 @@ nano /opt/nexus/.env
 
 ```env
 DOMAIN=13-55-12-34.sslip.io
-FILES_DOMAIN=files.13-55-12-34.sslip.io
 PUBLIC_APP_URL=https://13-55-12-34.sslip.io
-MINIO_PUBLIC_ENDPOINT=https://files.13-55-12-34.sslip.io
 ACME_EMAIL=your-real@email.com
 ```
 
-`PUBLIC_APP_URL` must start with `https://` and have **no** trailing slash.
+`PUBLIC_APP_URL` must start with `https://` and have **no** trailing slash. On
+this profile it is load-bearing beyond cosmetics: it is the base URL used to
+build download links for PDFs and resumes.
 
-**7b. Set two passwords.** Generate each with `openssl rand -base64 24`:
+There is no `FILES_DOMAIN` or `MINIO_*` here — filesystem storage replaced
+MinIO. The template keeps those lines commented at the bottom in case you move
+to the 4 GB plan later.
+
+**7b. Set two secrets.** Generate each with `openssl rand -base64 24`:
 
 ```env
 APP_PASSWORD=first-random-string
-MINIO_SECRET_KEY=second-random-string
+FILES_SIGNING_SECRET=second-random-string
 ```
 
-`APP_PASSWORD` is what you give people. Do not leave either at the default.
+`APP_PASSWORD` is what you give people. `FILES_SIGNING_SECRET` signs the
+expiring `/api/files` download links — keeping it separate means changing the
+login password later does not invalidate live links. Do not leave either
+at the default.
+
+**7b-2. Set your GitHub username** so the server knows which images to pull.
+It must be **lowercase** — container registries reject capitals:
+
+```env
+NEXUS_IMAGE_OWNER=jatinsharma-create
+```
 
 **7c. Paste the API keys** from step 2:
 
@@ -331,37 +408,60 @@ Leave everything else as it came. Save and exit.
 **7d. Check it:**
 
 ```bash
-cd /opt/nexus && grep -E '^(DOMAIN|PUBLIC_APP_URL|APP_PASSWORD|TELNYX_API_KEY)=' .env
+cd /opt/nexus && grep -E '^(DOMAIN|PUBLIC_APP_URL|APP_PASSWORD|FILES_SIGNING_SECRET|NEXUS_IMAGE_OWNER|TELNYX_API_KEY|COMPOSE_FILE)=' .env
 ```
 
-All four must have real values after the `=`.
+All seven must have real values after the `=`. `COMPOSE_FILE` should already
+read:
+
+```env
+COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml:docker-compose.small.yml:docker-compose.registry.yml
+```
+
+That line is why every command below is just `docker compose …` with no `-f`
+flags — Compose reads it from `.env` and applies the four files in order.
 
 > Never copy your laptop `.env` onto the server. It sets `HTTP_PORT=8080` and
 > an ngrok URL, and HTTPS will not work.
 
+> **On the US$24 / 4 GB plan instead?** Change one line — set
+> `COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml` and follow the
+> commented block at the bottom of `.env.production.example` to turn MinIO back
+> on. Everything else in this guide is identical, except Step 8 builds locally
+> and takes 30–45 minutes.
+
 ---
 
-## Step 8 — Build and start (30–45 min, unattended)
+## Step 8 — Pull and start (2–3 min)
+
+Make sure the Actions run from Step 0 has finished and both packages are public
+before this.
 
 ```bash
-cd /opt/nexus && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+cd /opt/nexus && docker compose up -d
 ```
 
-Go and do something else. **Do not press Ctrl+C.**
-
-> Expect this to be slower than it would be on a dedicated server. Lightsail
-> gives each vCPU a **20% sustained CPU baseline** with a burst allowance on
-> top. A long Next.js compile drains the burst and then runs at baseline. It is
-> a one-off cost — normal running sits well under baseline, and unlike EC2's
-> T-instances Lightsail throttles rather than billing you for the overage.
-
-When you get the prompt back:
+This pulls the two prebuilt images and starts five containers. Nothing compiles
+on the server, so it is minutes rather than the better part of an hour.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+docker compose ps
 ```
 
-Six services, all `running`: **app, worker, db, redis, storage, caddy**.
+Five services, all `running`: **app, worker, db, redis, caddy**.
+
+There is deliberately **no `storage` service** — that was MinIO, and
+filesystem storage replaced it. Five is correct here, not a missing container.
+
+> **`manifest unknown` or `denied`?** The images are not public yet or
+> `NEXUS_IMAGE_OWNER` is wrong. Check what it is trying to fetch with
+> `docker compose config | grep image:`, then revisit Step 0b. The owner must
+> be lowercase.
+
+> Lightsail gives each vCPU a **20% sustained CPU baseline** with a burst
+> allowance on top. That mattered a lot when the box compiled Next.js itself;
+> now that builds happen on GitHub, normal running sits well under baseline.
+> Unlike EC2's T-instances, Lightsail throttles rather than billing overage.
 
 ---
 
@@ -401,7 +501,7 @@ If the certificate is not ready, wait 3 minutes and retry. If it still fails
 after 5, read the log rather than guessing:
 
 ```bash
-cd /opt/nexus && docker compose -f docker-compose.yml -f docker-compose.prod.yml logs caddy | grep -iE "error|certificate|obtain" | tail -20
+cd /opt/nexus && docker compose logs caddy | grep -iE "error|certificate|obtain" | tail -20
 ```
 
 - **`too many certificates already issued for "sslip.io"`** — the shared quota
@@ -415,7 +515,7 @@ If `ready` is false, the `missing` list names the empty `.env` variables. Fix
 them, then reload without rebuilding:
 
 ```bash
-cd /opt/nexus && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+cd /opt/nexus && docker compose up -d
 ```
 
 ---
@@ -466,7 +566,7 @@ cd /opt/nexus && ./scripts/deploy-update.sh
 ```
 
 To change the login password: edit `APP_PASSWORD` in `/opt/nexus/.env`, then
-`docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`.
+`docker compose up -d`.
 
 > **Never** run `docker compose down -v` on the server. The `-v` deletes your
 > database and all stored PDFs.
@@ -475,14 +575,26 @@ To change the login password: edit `APP_PASSWORD` in `/opt/nexus/.env`, then
 
 Lightsail snapshots are the easy win — whole-instance, restorable, about
 US$0.05/GB-month. On the instance page, **Snapshots** → **Enable automatic
-snapshots**. An 80 GB instance runs roughly US$4/month. Worth it once you have
+snapshots**. A 60 GB instance runs roughly US$3/month. Worth it once you have
 real candidate data.
+
+Snapshots now matter more than they did: PDFs and resumes live in the `files`
+Docker volume on this instance rather than in MinIO. A snapshot captures them
+along with Postgres.
 
 ### Watch the disk
 
-Recordings are MP3 and nothing deletes them. At 2 hours of calls a day you
-will add roughly **2 GB a month**. The 80 GB disk gives you a few years, but it
-is not infinite — check occasionally with `df -h`.
+Recordings are MP3 and nothing deletes them. At 2 hours of calls a day you add
+roughly **2 GB a month**, plus PDFs and resumes in the `files` volume. The
+60 GB disk gives you a couple of years. Check occasionally:
+
+```bash
+df -h /
+docker system df -v | grep -E "nexus_files|nexus_postgres"
+```
+
+If it does fill, the honest fix is pruning old recordings — nothing in the app
+expires them yet.
 
 ---
 
@@ -492,8 +604,8 @@ Start here:
 
 ```bash
 cd /opt/nexus
-docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
-docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=100
+docker compose ps
+docker compose logs --tail=100
 ```
 
 | What you see | What it means |
@@ -501,7 +613,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=100
 | `Permission denied (publickey)` | Wrong key or wrong user. It is `ubuntu`, not `root`, and the `.pem` needs `chmod 400`. |
 | SSH just hangs | Firewall missing port 22, or you used the old dynamic IP instead of the static one. |
 | Site worked, then died after a reboot | No static IP attached. Step 4. |
-| `free -h` shows 1.9 Gi | US$12 plan. Resize to the US$24 plan. |
+| `manifest unknown` / `denied` on pull | Images not public, or `NEXUS_IMAGE_OWNER` wrong or capitalised. Step 0b. |
+| Only 4 containers, no `worker` | The `worker` image failed to pull. `docker compose pull worker`. |
 | Certificate / HTTPS error | Wait 3 min. Check inbound 80 **and** 443. Then read the Caddy log as in step 10. |
 | `too many certificates already issued for "sslip.io"` | Shared quota exhausted. Switch to a real domain (step 5b). |
 | Browser shows `502` | App still building or crashed. `logs -f app`. |
@@ -509,8 +622,10 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=100
 | `publicReachable: false` | HTTPS or the webhook path, not your Telnyx keys. |
 | Candidate answers to silence | Step 9 not done, or the URL has a typo. |
 | Call worked but no PDF | They pressed **2**. Working as designed. |
-| Worker killed / out of memory | Not the 4 GB plan, or bootstrap's swap step was skipped. |
-| Build crawling | Burst capacity spent. Let it finish; it is one-off. |
+| Worker killed / out of memory | Check swap is on with `free -h` (want ~4 Gi). If a PDF job died, BullMQ retries it — `docker compose logs worker`. |
+| Download link says "invalid or has expired" | Links last 15 minutes. Reload the page for a fresh one. If every link fails, `FILES_SIGNING_SECRET` changed. |
+| Download 404s | The PDF was written before storage switched, or the `files` volume was recreated. |
+| `no space left on device` | `df -h`, then see "Watch the disk". |
 
 ---
 
@@ -522,7 +637,18 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=100
 | `scripts/server-bootstrap.sh` | Step 6: swap, Docker, clone, `.env` template |
 | `scripts/aws-lightsail-bootstrap.sh` | Alias for the above |
 | `scripts/sslip-hostnames.sh` | Step 5: hostnames from your IP |
-| `scripts/deploy-update.sh` | Ship an update |
+| `scripts/deploy-update.sh` | Ship an update (pulls or builds based on `COMPOSE_FILE`) |
 | `docker-compose.yml` + `docker-compose.prod.yml` | The stack; production binds Caddy to 80/443 |
-| `Caddyfile.production` | HTTPS via Let's Encrypt |
+| **`docker-compose.small.yml`** | The 2 GB profile: no MinIO, tuned Postgres, memory ceilings |
+| **`docker-compose.registry.yml`** | Pull prebuilt images instead of building here |
+| **`.github/workflows/build-images.yml`** | Builds both images on every push to `deploy` |
+| `Caddyfile.production` | HTTPS for the 4 GB profile (app + MinIO vhosts) |
+| **`Caddyfile.small`** | HTTPS for the 2 GB profile (one vhost, one certificate) |
 | `.env.production.example` | Template the bootstrap copies to `.env` |
+
+And in the app itself:
+
+| File | Purpose |
+|------|---------|
+| `app/modules/storage/providers/fs.ts` | Filesystem object store and its signed-URL scheme |
+| `app/app/api/files/[...key]/route.ts` | Serves those signed links |
