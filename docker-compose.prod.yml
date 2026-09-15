@@ -1,4 +1,4 @@
-# Production overrides for Hetzner CX23 (or any single VPS).
+# Production overrides for AWS Lightsail (or any single Ubuntu VM).
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
 # Do NOT use --profile tunnel here. Production has a real hostname; ngrok is

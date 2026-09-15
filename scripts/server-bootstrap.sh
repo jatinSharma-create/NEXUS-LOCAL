@@ -13,7 +13,7 @@ BRANCH="${NEXUS_BRANCH:-deploy}"
 INSTALL_DIR="${NEXUS_INSTALL_DIR:-/opt/nexus}"
 SWAP_SIZE="${NEXUS_SWAP_SIZE:-2G}"
 
-# Hetzner logs in as root; OVH logs in as a sudo user. Support both.
+# Lightsail and OVH log in as a sudo user; bare VPS images log in as root.
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
 elif command -v sudo >/dev/null; then

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Print free sslip.io hostnames for a VPS IPv4 (no domain purchase needed).
-# Usage: ./scripts/sslip-hostnames.sh 49.13.12.34
+# Print free sslip.io hostnames for a server IPv4 (no domain purchase needed).
+# On Lightsail, pass the STATIC IP — the default public IP changes on stop.
+# Usage: ./scripts/sslip-hostnames.sh 13.55.12.34
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 IPV4"
-  echo "Example: $0 49.13.12.34"
+  echo "Example: $0 13.55.12.34"
   exit 1
 fi
 
