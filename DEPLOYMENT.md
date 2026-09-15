@@ -11,7 +11,7 @@ They install nothing.
 |------|------|
 | Hetzner **CX23** server (2 vCPU, 4 GB, 40 GB) | €5.49 / month |
 | Public IPv4 address | €0.50 / month |
-| Domain name | **€0** — free `sslip.io` hostname |
+| Domain name | **€0** — free `sslip.io` hostname (see step 4; ~A$15/yr for your own is safer) |
 | HTTPS certificate | **€0** — Let's Encrypt |
 | **Total** | **€5.99 ≈ A$10 / month** |
 
@@ -165,6 +165,43 @@ It prints five lines. Copy all of them — that is your `.env` block and your
 Telnyx webhook. For `49.13.12.34` the site would be
 `https://49-13-12-34.sslip.io`.
 
+> **Know this one risk before you rely on it.** Every `sslip.io` user shares a
+> single Let's Encrypt certificate quota, because `sslip.io` is deliberately
+> not on the Public Suffix List. That quota does get exhausted — it was raised
+> to 200,000 certificates a week in February 2026 and still ran dry. If it is
+> empty on the day you deploy, Caddy cannot get a certificate and **there is no
+> way to force it**; the window is a rolling week.
+>
+> It is free and usually works, so it is a fine way to get running today. But if
+> this is going in front of real candidates, spend ~A$15/year on a domain name
+> and skip the lottery entirely. Step 4b tells you how.
+
+### Step 4b — Using a real domain instead (optional, 10 min)
+
+Buy any cheap `.com` or `.xyz`. At your registrar add two **A records**, both
+pointing at `YOUR_IP`:
+
+| Type | Name | Value |
+|------|------|-------|
+| A | `nexus` | `YOUR_IP` |
+| A | `files.nexus` | `YOUR_IP` |
+
+Then in step 6 use your own names instead of the sslip.io ones:
+
+```env
+DOMAIN=nexus.yourdomain.com
+FILES_DOMAIN=files.nexus.yourdomain.com
+PUBLIC_APP_URL=https://nexus.yourdomain.com
+MINIO_PUBLIC_ENDPOINT=https://files.nexus.yourdomain.com
+```
+
+Nothing else changes, and your certificate quota is yours alone. Wait for DNS
+to resolve before step 7:
+
+```bash
+dig +short nexus.yourdomain.com
+```
+
 ---
 
 ## Step 5 — Connect and run one command (5 min)
@@ -311,6 +348,23 @@ You need all four:
 If the certificate is not ready yet, wait 3 minutes and retry — Let's Encrypt
 takes a moment on first boot.
 
+If it still fails after 5 minutes, read the certificate log rather than guessing:
+
+```bash
+cd /opt/nexus && docker compose -f docker-compose.yml -f docker-compose.prod.yml logs caddy | grep -iE "error|certificate|obtain" | tail -20
+```
+
+Match what you see:
+
+- **`too many certificates already issued for "sslip.io"`** — the shared quota
+  from step 4 is empty. Nothing you can do to the server fixes this. Go do
+  step 4b with a real domain, then `up -d` again.
+- **`timeout` or `connection refused` during the challenge** — inbound port 80
+  is not open. Recheck the firewall in step 3; Let's Encrypt needs 80 as well
+  as 443.
+- **`DNS problem` / `NXDOMAIN`** — `DOMAIN` is misspelled, or your A records
+  have not propagated yet.
+
 If `ready` is false, the `missing` list names the empty `.env` variables. Fix
 them, then reload without rebuilding:
 
@@ -389,7 +443,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=100
 | `Permission denied (publickey)` | SSH key not ticked in step 3. Easiest fix is to delete the server and redo step 3. |
 | SSH just hangs | Firewall missing port 22, or wrong IP. |
 | `uname -m` says `aarch64` | ARM box. Delete, rebuild as CX23 x86. |
-| Certificate / HTTPS error | Wait 3 min. Check inbound 80 **and** 443. `DOMAIN` must match the URL exactly. |
+| Certificate / HTTPS error | Wait 3 min. Check inbound 80 **and** 443. `DOMAIN` must match the URL exactly. Then read the Caddy log as in step 9. |
+| `too many certificates already issued for "sslip.io"` | Shared free-hostname quota is exhausted. Not fixable from the server — switch to a real domain (step 4b). |
 | Browser shows `502` | App still building or crashed. `logs -f app`. |
 | Health lists things in `missing` | Those `.env` lines are empty. |
 | `publicReachable: false` | HTTPS or the webhook path, not your Telnyx keys. |
